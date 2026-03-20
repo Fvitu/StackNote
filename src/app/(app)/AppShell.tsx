@@ -1,13 +1,15 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { WorkspaceProvider } from "@/contexts/WorkspaceContext"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { MainContent } from "@/components/layout/MainContent"
-import { SearchModal } from "@/components/layout/SearchModal"
+import { SearchModal } from "@/components/search/SearchModal";
 import { NameCaptureDialog } from "@/components/layout/NameCaptureDialog"
+import { AccountDialog } from "@/components/layout/AccountDialog";
 import { useWorkspace } from "@/contexts/WorkspaceContext"
 import type { WorkspaceTree, NoteTreeItem, FolderTreeItem } from "@/types"
+import { useKeyboardShortcut } from "@/hooks/useKeyboardShortcut";
 import {
   addNoteToTree,
   removeNoteFromTree,
@@ -41,8 +43,52 @@ function AppShellInner({
   const [optimisticTree, setOptimisticTree] = useState<WorkspaceTree>({ folders: [], rootNotes: [] })
   const [searchOpen, setSearchOpen] = useState(false)
   const [showNameDialog, setShowNameDialog] = useState(needsName)
-  const { state, setActiveNote, toggleSidebar } = useWorkspace()
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
+  const [currentUserName, setCurrentUserName] = useState(userName);
+  const [isSidebarPreviewOpen, setIsSidebarPreviewOpen] = useState(false);
+  const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
+  const [canUseSidebarPreview, setCanUseSidebarPreview] = useState(false);
+  const { state, setActiveNote, toggleFolder, toggleSidebar, setSidebarOpen } = useWorkspace();
   const pendingActionsRef = useRef<number>(0)
+
+  useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const noteId = params.get("note");
+		const folderId = params.get("folder");
+
+		if (noteId) {
+			setActiveNote(noteId);
+		}
+
+		if (folderId) {
+			setActiveFolderId(folderId);
+			toggleFolder(folderId);
+		}
+		// Intentionally run once to hydrate initial app state from URL.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+
+		if (state.activeNoteId) {
+			params.set("note", state.activeNoteId);
+		} else {
+			params.delete("note");
+		}
+
+		if (activeFolderId) {
+			params.set("folder", activeFolderId);
+		} else {
+			params.delete("folder");
+		}
+
+		const query = params.toString();
+		const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+		window.history.replaceState(null, "", nextUrl);
+  }, [state.activeNoteId, activeFolderId]);
 
   const fetchTree = useCallback(async () => {
     const res = await fetch(`/api/workspace/${workspaceId}/tree`)
@@ -59,6 +105,64 @@ function AppShellInner({
   useEffect(() => {
     fetchTree()
   }, [fetchTree])
+
+  const showSidebarPreview = useCallback(() => {
+		if (state.isSidebarOpen) return;
+		setIsSidebarPreviewOpen(true);
+  }, [state.isSidebarOpen]);
+
+  const hideSidebarPreview = useCallback(() => {
+		if (state.isSidebarOpen) return;
+		setIsSidebarPreviewOpen(false);
+  }, [state.isSidebarOpen]);
+
+  useEffect(() => {
+		if (state.isSidebarOpen) {
+			setIsSidebarPreviewOpen(false);
+		}
+  }, [state.isSidebarOpen]);
+
+  useEffect(() => {
+		if (typeof window === "undefined") return;
+
+		const mobileQuery = window.matchMedia("(max-width: 767px)");
+		const mediaQuery = window.matchMedia("(min-width: 768px) and (hover: hover) and (pointer: fine)");
+		const updateViewportMode = () => {
+			setIsMobileSidebarMode(mobileQuery.matches);
+			setCanUseSidebarPreview(mediaQuery.matches);
+			if (!mediaQuery.matches) {
+				setIsSidebarPreviewOpen(false);
+			}
+		};
+
+		updateViewportMode();
+		mobileQuery.addEventListener("change", updateViewportMode);
+		mediaQuery.addEventListener("change", updateViewportMode);
+
+		return () => {
+			mobileQuery.removeEventListener("change", updateViewportMode);
+			mediaQuery.removeEventListener("change", updateViewportMode);
+		};
+  }, []);
+
+  const openSidebarDocked = useCallback(() => {
+		setIsSidebarPreviewOpen(false);
+		setSidebarOpen(true);
+  }, [setSidebarOpen]);
+
+  const handleSidebarToggleButton = useCallback(() => {
+		if (isMobileSidebarMode) {
+			toggleSidebar();
+			return;
+		}
+
+		if (state.isSidebarOpen) {
+			toggleSidebar();
+			return;
+		}
+
+		openSidebarDocked();
+  }, [isMobileSidebarMode, openSidebarDocked, state.isSidebarOpen, toggleSidebar]);
 
   // Optimistic action wrapper
   const optimisticAction = useCallback(
@@ -98,10 +202,11 @@ function AppShellInner({
     async (folderId?: string) => {
       const tempId = `temp-${Date.now()}`
       const tempNote: NoteTreeItem = {
-        id: tempId,
-        title: "Untitled",
-        emoji: null,
-      }
+			id: tempId,
+			title: "Untitled",
+			emoji: null,
+			type: "note",
+		};
 
       return optimisticAction(
         (tree) => addNoteToTree(tree, tempNote, folderId),
@@ -127,11 +232,12 @@ function AppShellInner({
     async (parentId?: string) => {
       const tempId = `temp-folder-${Date.now()}`
       const tempFolder: FolderTreeItem = {
-        id: tempId,
-        name: "New Folder",
-        children: [],
-        notes: [],
-      }
+			id: tempId,
+			name: "New Folder",
+			type: "folder",
+			children: [],
+			notes: [],
+		};
 
       return optimisticAction(
         (tree) => addFolderToTree(tree, tempFolder, parentId),
@@ -250,93 +356,191 @@ function AppShellInner({
   )
 
   // Handle name submission for magic link users
-  const handleNameSubmit = useCallback(async (name: string) => {
-    try {
-      const res = await fetch("/api/user/name", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      })
+  const updateUserName = useCallback(async (name: string) => {
+		try {
+			const res = await fetch("/api/user/name", {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ name }),
+			});
 
-      if (!res.ok) {
-        throw new Error("Failed to update name")
-      }
+			if (!res.ok) {
+				throw new Error("Failed to update name");
+			}
 
-      setShowNameDialog(false)
-      // Reload page to update user name in session
-      window.location.reload()
-    } catch (error) {
-      console.error("Failed to update name:", error)
-      throw error
-    }
-  }, [])
+			setCurrentUserName(name);
+			setShowNameDialog(false);
+		} catch (error) {
+			console.error("Failed to update name:", error);
+			throw error;
+		}
+  }, []);
+
+  const updateWorkspaceName = useCallback(
+		async (name: string) => {
+			try {
+				const res = await fetch(`/api/workspace/${workspaceId}`, {
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ name }),
+				});
+
+				if (!res.ok) {
+					throw new Error("Failed to update workspace");
+				}
+
+				setCurrentWorkspaceName(name);
+				await fetchTree();
+			} catch (error) {
+				console.error("Failed to update workspace:", error);
+				throw error;
+			}
+		},
+		[workspaceId, fetchTree],
+  );
+
+  const handleNameSubmit = useCallback(
+		async (name: string) => {
+			try {
+				await updateUserName(name);
+				setShowNameDialog(false);
+			} catch (error) {
+				console.error("Failed to update name:", error);
+				throw error;
+			}
+		},
+		[updateUserName],
+  );
+
+  useKeyboardShortcut("k", () => setSearchOpen((v) => !v), { metaOrCtrl: true, preventDefault: true });
+  useKeyboardShortcut("\\", () => toggleSidebar(), { metaOrCtrl: true, preventDefault: true });
+
+  const sidebarProps = useMemo(
+		() => ({
+			workspaceId,
+			workspaceName: currentWorkspaceName,
+			userEmail,
+			userName: currentUserName,
+			isGoogleUser,
+			tree: optimisticTree,
+			onRefresh: fetchTree,
+			onSearchOpen: () => setSearchOpen(true),
+			onAccountOpen: () => {
+				setAccountDialogOpen(true);
+				// Close the sidebar on small screens when opening account panel
+				if (typeof window !== "undefined" && (isMobileSidebarMode || window.innerWidth < 768)) {
+					setSidebarOpen(false);
+				}
+			},
+			onCreateNote: handleCreateNote,
+			onCreateFolder: handleCreateFolder,
+			onDeleteNote: handleDeleteNote,
+			onDeleteFolder: handleDeleteFolder,
+			onRenameNote: handleRenameNote,
+			onRenameFolder: handleRenameFolder,
+			onMoveNote: handleMoveNote,
+			onMoveFolder: handleMoveFolder,
+			onFolderVisited: setActiveFolderId,
+		}),
+		[
+			workspaceId,
+			currentWorkspaceName,
+			userEmail,
+			currentUserName,
+			isGoogleUser,
+			optimisticTree,
+			fetchTree,
+			handleCreateNote,
+			handleCreateFolder,
+			handleDeleteNote,
+			handleDeleteFolder,
+			handleRenameNote,
+			handleRenameFolder,
+			handleMoveNote,
+			handleMoveFolder,
+			isMobileSidebarMode,
+			setSidebarOpen,
+			setAccountDialogOpen,
+		],
+  );
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault()
-        setSearchOpen((v) => !v)
-      }
-      if (e.key === "Escape") {
-        setSearchOpen(false)
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
-        e.preventDefault()
-        toggleSidebar()
-      }
-    }
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [toggleSidebar])
+		const onEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setSearchOpen(false);
+			}
+		};
+
+		window.addEventListener("keydown", onEscape);
+		return () => window.removeEventListener("keydown", onEscape);
+  }, []);
 
   return (
-    <div
-      className="flex h-screen overflow-hidden transition-all duration-300 ease-in-out"
-      style={{ backgroundColor: "var(--bg-app)" }}
-    >
-      {state.isSidebarOpen && (
-        <div className="animate-in slide-in-from-left-48 duration-300">
-          <Sidebar
-            workspaceId={workspaceId}
-            workspaceName={workspaceName}
-            userEmail={userEmail}
-            userName={userName}
-            isGoogleUser={isGoogleUser}
-            tree={optimisticTree}
-            onRefresh={fetchTree}
-            onSearchOpen={() => setSearchOpen(true)}
-            onCreateNote={handleCreateNote}
-            onCreateFolder={handleCreateFolder}
-            onDeleteNote={handleDeleteNote}
-            onDeleteFolder={handleDeleteFolder}
-            onRenameNote={handleRenameNote}
-            onRenameFolder={handleRenameFolder}
-            onMoveNote={handleMoveNote}
-            onMoveFolder={handleMoveFolder}
-          />
-        </div>
-      )}
-      <MainContent
-        workspaceId={workspaceId}
-        workspaceName={workspaceName}
-        onNoteCreated={fetchTree}
-        onRefresh={fetchTree}
-        isSidebarOpen={state.isSidebarOpen}
-        onToggleSidebar={toggleSidebar}
-      />
-      {searchOpen && (
-        <SearchModal
-          tree={optimisticTree}
-          onSelectNote={(id) => setActiveNote(id)}
-          onClose={() => setSearchOpen(false)}
-        />
-      )}
-      <NameCaptureDialog
-        open={showNameDialog}
-        onNameSubmit={handleNameSubmit}
-      />
-    </div>
-  )
+		<div className="relative flex h-screen overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
+			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && (
+				<div className="sidebar-preview-trigger" onMouseEnter={showSidebarPreview} aria-hidden="true" />
+			)}
+			<div
+				className={`sidebar-dock ${state.isSidebarOpen ? "sidebar-dock-open" : "sidebar-dock-closed"}`}
+				style={{ width: state.isSidebarOpen && !isMobileSidebarMode ? state.sidebarWidth : 0 }}>
+				<div className={`sidebar-surface ${state.isSidebarOpen ? "sidebar-surface-open" : "sidebar-surface-closed"}`}>
+					<Sidebar {...sidebarProps} />
+				</div>
+			</div>
+			{isMobileSidebarMode && state.isSidebarOpen && (
+				<>
+					<button type="button" className="sidebar-mobile-backdrop" onClick={toggleSidebar} aria-label="Close sidebar overlay" />
+					<div className="sidebar-mobile-layer" style={{ width: state.sidebarWidth }}>
+						<div className="sidebar-surface sidebar-surface-open sidebar-mobile-surface">
+							<Sidebar {...sidebarProps} />
+						</div>
+					</div>
+				</>
+			)}
+			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && (
+				<div
+					className={`sidebar-preview-layer ${isSidebarPreviewOpen ? "sidebar-preview-layer-open" : ""}`}
+					style={{ width: state.sidebarWidth }}
+					onMouseEnter={showSidebarPreview}
+					onMouseLeave={hideSidebarPreview}
+					aria-hidden={!isSidebarPreviewOpen}>
+					<div className={`sidebar-surface sidebar-preview-surface ${isSidebarPreviewOpen ? "sidebar-surface-open" : "sidebar-surface-closed"}`}>
+						<Sidebar {...sidebarProps} />
+					</div>
+				</div>
+			)}
+			<MainContent
+				workspaceId={workspaceId}
+				workspaceName={currentWorkspaceName}
+				onNoteCreated={fetchTree}
+				onRefresh={fetchTree}
+				isSidebarOpen={state.isSidebarOpen}
+				onToggleSidebar={handleSidebarToggleButton}
+			/>
+			<SearchModal
+				workspaceId={workspaceId}
+				open={searchOpen}
+				onSelectNote={(id) => {
+					setActiveNote(id);
+					if (typeof window !== "undefined" && window.innerWidth < 768) {
+						toggleSidebar();
+					}
+				}}
+				onClose={() => setSearchOpen(false)}
+			/>
+			<AccountDialog
+				open={accountDialogOpen}
+				userName={currentUserName}
+				userEmail={userEmail}
+				workspaceName={currentWorkspaceName}
+				isGoogleUser={isGoogleUser}
+				onClose={() => setAccountDialogOpen(false)}
+				onSaveUserName={updateUserName}
+				onSaveWorkspaceName={updateWorkspaceName}
+			/>
+			<NameCaptureDialog open={showNameDialog} onNameSubmit={handleNameSubmit} />
+		</div>
+  );
 }
 
 export function AppShell({

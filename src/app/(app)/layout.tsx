@@ -11,7 +11,7 @@ export default async function AppLayout({
   const session = await auth()
 
   if (!session?.user?.id) {
-    redirect("/login")
+    redirect("/login?reason=session-expired");
   }
 
   const workspace = await prisma.workspace.findFirst({
@@ -31,19 +31,23 @@ export default async function AppLayout({
     },
   })
 
+  const user = await prisma.user.findUnique({
+		where: { id: session.user.id },
+		select: { name: true, email: true },
+  });
+
   // Check if user needs to provide name (magic link users without name)
-  const needsName = !session.user.name && !googleAccount
+  const needsName = !user?.name && !googleAccount;
 
   return (
-    <AppShell
-      workspaceId={workspace.id}
-      workspaceName={workspace.name}
-      userEmail={session.user.email ?? ""}
-      userName={session.user.name ?? ""}
-      isGoogleUser={!!googleAccount}
-      needsName={needsName}
-    >
-      {children}
-    </AppShell>
-  )
+		<AppShell
+			workspaceId={workspace.id}
+			workspaceName={workspace.name}
+			userEmail={user?.email ?? session.user.email ?? ""}
+			userName={user?.name ?? ""}
+			isGoogleUser={!!googleAccount}
+			needsName={needsName}>
+			{children}
+		</AppShell>
+  );
 }

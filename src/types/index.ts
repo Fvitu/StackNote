@@ -1,8 +1,12 @@
 export interface NoteTreeItem {
-  id: string
-  title: string
-  emoji?: string | null
-  type: "note"
+	id: string;
+	title: string;
+	emoji?: string | null;
+	contentText?: string;
+	createdAt?: string;
+	updatedAt?: string;
+	folderId?: string | null;
+	type: "note";
 }
 
 export interface FolderTreeItem {

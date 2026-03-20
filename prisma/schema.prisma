@@ -8,17 +8,17 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
+  id            String      @id @default(cuid())
+  email         String      @unique
   name          String?
   image         String?
   emailVerified DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  accounts   Account[]
-  sessions   Session[]
-  workspaces Workspace[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  workspaces    Workspace[]
+  files         File[]
 
   @@map("users")
 }
@@ -29,15 +29,14 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@map("accounts")
@@ -48,8 +47,7 @@ model Session {
   sessionToken String   @unique
   userId       String
   expires      DateTime
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("sessions")
 }
@@ -69,48 +67,49 @@ model Workspace {
   userId    String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  folders Folder[]
-  notes   Note[]
+  folders   Folder[]
+  notes     Note[]
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("workspaces")
 }
 
 model Folder {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
   workspaceId String
   parentId    String?
-  order       Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  parent    Folder?   @relation("FolderChildren", fields: [parentId], references: [id])
-  children  Folder[]  @relation("FolderChildren")
-  notes     Note[]
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  parent      Folder?   @relation("FolderChildren", fields: [parentId], references: [id])
+  children    Folder[]  @relation("FolderChildren")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  notes       Note[]
 
   @@map("folders")
 }
 
 model Note {
-  id          String   @id @default(cuid())
-  title       String   @default("Untitled")
+  id          String        @id @default(cuid())
+  title       String        @default("Untitled")
   content     Json?
   workspaceId String
   folderId    String?
   emoji       String?
   coverImage  String?
-  isArchived  Boolean  @default(false)
-  order       Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  coverImageMeta Json?
+  isArchived  Boolean       @default(false)
+  order       Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  versions    NoteVersion[]
+  files       File[]
+  searchVector Unsupported("tsvector")?
+  folder      Folder?       @relation(fields: [folderId], references: [id])
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  folder    Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  versions  NoteVersion[]
-
+  @@index([searchVector], type: Gin)
   @@map("notes")
 }
 
@@ -119,8 +118,28 @@ model NoteVersion {
   noteId    String
   content   Json
   createdAt DateTime @default(now())
+  manual    Boolean  @default(false)
+  label     String?
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([noteId, createdAt])
+  @@map("note_versions")
+}
+
+model File {
+  id        String   @id @default(cuid())
+  noteId    String
+  userId    String
+  name      String
+  type      String
+  mimeType  String
+  size      Int
+  path      String
+  url       String
+  createdAt DateTime @default(now())
 
   note Note @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("note_versions")
+  @@map("files")
 }

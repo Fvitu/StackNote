@@ -398,3 +398,185 @@ select:disabled,
 .smooth-border {
   transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* Custom text selection to match StackNote violet accent */
+::selection {
+  background-color: rgba(124, 106, 255, 0.20);
+  /* soft violet */
+  color: var(--primary-foreground);
+  /* ensures readable text (usually white) */
+}
+
+/* Firefox selection */
+::-moz-selection {
+  background-color: rgba(124, 106, 255, 0.20);
+  color: var(--primary-foreground);
+}
+
+/* Slightly stronger selection on interactive elements for better visibility */
+a::selection,
+button::selection,
+input::selection,
+textarea::selection {
+  background-color: rgba(124, 106, 255, 0.28);
+  color: var(--primary-foreground);
+}
+
+.sidebar-dock {
+  position: relative;
+  z-index: 10;
+  flex: 0 0 auto;
+  height: 100%;
+  min-height: 100dvh;
+  overflow: hidden;
+  transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: width;
+}
+
+.sidebar-dock-open {
+  pointer-events: auto;
+}
+
+.sidebar-dock-closed {
+  pointer-events: none;
+}
+
+.sidebar-surface {
+  width: 100%;
+  height: 100%;
+  transition:
+    clip-path 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  clip-path: inset(0 0 0 0);
+  will-change: clip-path, opacity;
+  backface-visibility: hidden;
+}
+
+.sidebar-surface-open {
+  opacity: 1;
+  clip-path: inset(0 0 0 0);
+}
+
+.sidebar-surface-closed {
+  opacity: 0;
+  clip-path: inset(0 100% 0 0);
+}
+
+.sidebar-preview-trigger {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 45;
+  width: 10px;
+}
+
+.sidebar-preview-layer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 50;
+  height: 100dvh;
+  pointer-events: none;
+}
+
+.sidebar-preview-layer-open {
+  pointer-events: auto;
+}
+
+.sidebar-preview-surface {
+  height: 100dvh;
+  max-height: 100dvh;
+  box-shadow: 24px 0 48px rgba(0, 0, 0, 0.28);
+}
+
+.sidebar-preview-layer:not(.sidebar-preview-layer-open) .sidebar-preview-surface {
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+.sidebar-mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 54;
+  background: rgba(0, 0, 0, 0.24);
+  border: 0;
+  padding: 0;
+}
+
+.sidebar-mobile-layer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 55;
+  height: 100dvh;
+  pointer-events: auto;
+}
+
+.sidebar-mobile-surface {
+  height: 100dvh;
+  max-height: 100dvh;
+  box-shadow: 24px 0 48px rgba(0, 0, 0, 0.32);
+}
+
+.stacknote-shiki pre,
+.stacknote-shiki code,
+.stacknote-shiki span {
+  font-family: var(--font-mono) !important;
+}
+
+.stacknote-shiki pre {
+  margin: 0 !important;
+  background: transparent !important;
+  white-space: normal !important;
+  overflow-x: auto !important;
+  line-height: 1.7 !important;
+  font-size: 13.5px !important;
+}
+
+.stacknote-shiki .line {
+  display: block;
+  white-space: pre;
+  line-height: 1.7;
+}
+
+.katex-wrapper .katex {
+  color: var(--text-primary);
+}
+
+.stacknote-inline-equation {
+  margin: 0 0.12em;
+  padding: 0.05em 0.28em;
+  border-radius: 0.45em;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  vertical-align: baseline;
+}
+
+.stacknote-inline-equation code {
+  white-space: pre-wrap;
+}
+
+mark {
+  background: rgba(124, 106, 255, 0.25);
+  color: #c4bcff;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Keep BlockNote slash menus scrollable without chaining scroll to the editor. */
+.bn-mantine .bn-suggestion-menu,
+.bn-mantine .bn-grid-suggestion-menu {
+  overscroll-behavior: contain;
+  animation: stacknote-slash-menu-enter 120ms ease-out;
+  transform-origin: top left;
+  will-change: opacity, transform;
+}
+
+@keyframes stacknote-slash-menu-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

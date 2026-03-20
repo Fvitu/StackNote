@@ -4,7 +4,7 @@ import Resend from "next-auth/providers/resend"
 import Google from "next-auth/providers/google"
 import { prisma } from "@/lib/prisma"
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
+const _nextAuth = NextAuth({
 	adapter: PrismaAdapter(prisma),
 	providers: [
 		Resend({
@@ -38,3 +38,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 		},
 	},
 });
+
+export const handlers = _nextAuth.handlers;
+export const signIn = _nextAuth.signIn;
+export const signOut = _nextAuth.signOut;
+export const auth = _nextAuth.auth;

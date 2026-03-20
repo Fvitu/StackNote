@@ -1,35 +1,27 @@
 "use client"
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useReducer,
-  type ReactNode,
-} from "react"
+import { createContext, useCallback, useContext, useReducer, useEffect, type ReactNode } from "react";
 
 interface WorkspaceState {
-  activeNoteId: string | null
-  expandedFolders: Set<string>
-  sidebarWidth: number
-  isSidebarOpen: boolean
-  isFullscreen: boolean
+	activeNoteId: string | null;
+	expandedFolders: Set<string>;
+	sidebarWidth: number;
+	isSidebarOpen: boolean;
 }
 
 type WorkspaceAction =
-  | { type: "SET_ACTIVE_NOTE"; noteId: string | null }
-  | { type: "TOGGLE_FOLDER"; folderId: string }
-  | { type: "SET_SIDEBAR_WIDTH"; width: number }
-  | { type: "TOGGLE_SIDEBAR" }
-  | { type: "SET_FULLSCREEN"; value: boolean }
+	| { type: "SET_ACTIVE_NOTE"; noteId: string | null }
+	| { type: "TOGGLE_FOLDER"; folderId: string }
+	| { type: "SET_SIDEBAR_WIDTH"; width: number }
+	| { type: "TOGGLE_SIDEBAR" }
+	| { type: "SET_SIDEBAR_OPEN"; isOpen: boolean };
 
 const initialState: WorkspaceState = {
-  activeNoteId: null,
-  expandedFolders: new Set<string>(),
-  sidebarWidth: 240,
-  isSidebarOpen: true,
-  isFullscreen: false,
-}
+	activeNoteId: null,
+	expandedFolders: new Set<string>(),
+	sidebarWidth: 240,
+	isSidebarOpen: true,
+};
 
 function workspaceReducer(
   state: WorkspaceState,
@@ -50,21 +42,21 @@ function workspaceReducer(
     case "SET_SIDEBAR_WIDTH":
       return { ...state, sidebarWidth: action.width }
     case "TOGGLE_SIDEBAR":
-      return { ...state, isSidebarOpen: !state.isSidebarOpen }
-    case "SET_FULLSCREEN":
-      return { ...state, isFullscreen: action.value }
+      return { ...state, isSidebarOpen: !state.isSidebarOpen };
+    case "SET_SIDEBAR_OPEN":
+      return { ...state, isSidebarOpen: action.isOpen };
     default:
       return state
   }
 }
 
 interface WorkspaceContextValue {
-  state: WorkspaceState
-  setActiveNote: (noteId: string | null) => void
-  toggleFolder: (folderId: string) => void
-  setSidebarWidth: (width: number) => void
-  toggleSidebar: () => void
-  setFullscreen: (value: boolean) => void
+	state: WorkspaceState;
+	setActiveNote: (noteId: string | null) => void;
+	toggleFolder: (folderId: string) => void;
+	setSidebarWidth: (width: number) => void;
+	toggleSidebar: () => void;
+	setSidebarOpen: (isOpen: boolean) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
@@ -92,18 +84,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     []
   )
 
-  const setFullscreen = useCallback(
-    (value: boolean) => dispatch({ type: "SET_FULLSCREEN", value }),
-    []
-  )
+  const setSidebarOpen = useCallback((isOpen: boolean) => dispatch({ type: "SET_SIDEBAR_OPEN", isOpen }), []);
+
+  // Auto-close/open sidebar based on viewport width (client-only)
+  useEffect(() => {
+		const apply = () => {
+			const isWide = window.innerWidth >= 768;
+			dispatch({ type: "SET_SIDEBAR_OPEN", isOpen: isWide });
+		};
+		apply();
+		window.addEventListener("resize", apply);
+		return () => window.removeEventListener("resize", apply);
+  }, []);
 
   return (
-    <WorkspaceContext.Provider
-      value={{ state, setActiveNote, toggleFolder, setSidebarWidth, toggleSidebar, setFullscreen }}
-    >
-      {children}
-    </WorkspaceContext.Provider>
-  )
+		<WorkspaceContext.Provider value={{ state, setActiveNote, toggleFolder, setSidebarWidth, toggleSidebar, setSidebarOpen }}>
+			{children}
+		</WorkspaceContext.Provider>
+  );
 }
 
 export function useWorkspace() {
