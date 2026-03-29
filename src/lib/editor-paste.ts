@@ -87,7 +87,10 @@ const BLOCK_TAGS = new Set([
 ])
 
 function normalizeText(value: string): string {
-  return value.replace(/\u00a0/g, " ").replace(/\r\n?/g, "\n")
+  return value
+    .replace(/\u00a0/g, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/\r\n?/g, "\n")
 }
 
 function isSupportedLanguageId(value: string): value is SupportedLanguageId {
@@ -733,7 +736,30 @@ export function transformExternalHtmlForEditor(html: string): string {
 }
 
 export function convertPlainTextToEditorHtml(text: string): string {
-  return transformExternalHtmlForEditor(markdownToHTML(text))
+  return transformExternalHtmlForEditor(markdownToHTML(normalizeText(text)))
+}
+
+interface RichTextBlockParsingEditor {
+  tryParseHTMLToBlocks: (html: string) => unknown[]
+  tryParseMarkdownToBlocks: (markdown: string) => unknown[]
+}
+
+export function parseRichTextToBlocks(editor: RichTextBlockParsingEditor, text: string): unknown[] {
+  const normalized = normalizeText(text).trim()
+  if (!normalized) {
+    return []
+  }
+
+  const htmlBlocks = editor.tryParseHTMLToBlocks(convertPlainTextToEditorHtml(normalized))
+  if (htmlBlocks.length > 0) {
+    return htmlBlocks
+  }
+
+  try {
+    return editor.tryParseMarkdownToBlocks(normalized)
+  } catch {
+    return []
+  }
 }
 
 export function shouldPreferPlainTextPaste(text: string): boolean {

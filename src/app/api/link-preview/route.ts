@@ -209,8 +209,7 @@ export async function GET(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Host is not allowed" }, { status: 400 })
   }
-
-  const url = normalizedUrl.toString()
+ const url = normalizedUrl.toString()
   const video = parseVideoEmbedUrl(url)
 
   const fallback = buildFallbackPayload(url)

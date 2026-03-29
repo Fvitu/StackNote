@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { BadgeCheck, BriefcaseBusiness, LogOut, Mail, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { GuestInfo } from "@/components/ui/GuestInfo";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ interface AccountDialogProps {
 	userEmail: string;
 	workspaceName: string;
 	isGoogleUser: boolean;
+	isGuestUser: boolean;
 	onClose: () => void;
 	onSaveUserName: (name: string) => Promise<void>;
 	onSaveWorkspaceName: (name: string) => Promise<void>;
@@ -54,6 +56,7 @@ export function AccountDialog({
 	userEmail,
 	workspaceName,
 	isGoogleUser,
+	isGuestUser,
 	onClose,
 	onSaveUserName,
 	onSaveWorkspaceName,
@@ -72,8 +75,9 @@ export function AccountDialog({
 		setWorkspaceState(IDLE_STATE);
 	}, [open, userName, workspaceName]);
 
-	const displayName = userName.trim() || userEmail || "User";
-	const providerLabel = isGoogleUser ? "Google" : "Magic link";
+	const displayName = userName.trim() || (isGuestUser ? "Guest" : userEmail || "User");
+	const providerLabel = isGuestUser ? "Guest" : isGoogleUser ? "Google" : "Magic link";
+	const accountEmailLabel = isGuestUser ? "Not required for guest mode" : userEmail;
 	const profileDirty = nameDraft.trim() !== userName.trim();
 	const workspaceDirty = workspaceDraft.trim() !== workspaceName.trim();
 
@@ -144,7 +148,9 @@ export function AccountDialog({
 					</DialogHeader>
 
 					<div className="flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-[320px_minmax(0,1fr)]">
-						<div className="min-h-0 border-b p-3 sm:p-4 lg:border-r lg:border-b-0 lg:overflow-y-auto" style={{ borderColor: "var(--border-default)" }}>
+						<div
+							className="min-h-0 border-b p-3 sm:p-4 lg:border-r lg:border-b-0 lg:overflow-y-auto"
+							style={{ borderColor: "var(--border-default)" }}>
 							<div
 								className="relative overflow-hidden rounded-[18px] border p-4 sm:p-5"
 								style={{
@@ -172,7 +178,7 @@ export function AccountDialog({
 											{displayName}
 										</p>
 										<p className="break-all text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-											{userEmail}
+											{accountEmailLabel}
 										</p>
 									</div>
 									<div className="space-y-2.5 text-xs" style={{ color: "var(--text-secondary)" }}>
@@ -180,6 +186,13 @@ export function AccountDialog({
 											<ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--sn-accent)" }} />
 											<span className="min-w-0 break-words leading-relaxed">Signed in with {providerLabel}</span>
 										</div>
+										{isGuestUser && (
+											<div className="flex items-start">
+												<GuestInfo className="w-full">
+													Guest sessions are temporary. Notes and uploaded files are deleted after 24 hours of inactivity.
+												</GuestInfo>
+											</div>
+										)}
 										<div className="flex items-start gap-2">
 											<BriefcaseBusiness className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--sn-accent)" }} />
 											<span className="min-w-0 break-words leading-relaxed">Workspace: {workspaceName}</span>
@@ -189,8 +202,12 @@ export function AccountDialog({
 							</div>
 
 							<div className="mt-4 flex flex-col gap-4 sm:mt-5">
-								<div className="rounded-[14px] border p-4 sm:p-5" style={{ borderColor: "var(--border-default)", backgroundColor: "rgba(255,255,255,0.02)" }}>
-									<div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em]" style={{ color: "var(--text-tertiary)" }}>
+								<div
+									className="rounded-[14px] border p-4 sm:p-5"
+									style={{ borderColor: "var(--border-default)", backgroundColor: "rgba(255,255,255,0.02)" }}>
+									<div
+										className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em]"
+										style={{ color: "var(--text-tertiary)" }}>
 										<Sparkles className="h-3.5 w-3.5" />
 										Session
 									</div>
@@ -243,25 +260,41 @@ export function AccountDialog({
 
 									<div className="mt-4 grid gap-3.5 md:grid-cols-2 md:gap-4">
 										<label className="block">
-											<span className="mb-1.5 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em]" style={{ color: "var(--text-tertiary)" }}>
+											<span
+												className="mb-1.5 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em]"
+												style={{ color: "var(--text-tertiary)" }}>
 												<UserRound className="h-3.5 w-3.5" />
 												Name
 											</span>
-											<Input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} placeholder="Your name" disabled={profileState.status === "saving"} />
+											<Input
+												value={nameDraft}
+												onChange={(event) => setNameDraft(event.target.value)}
+												placeholder="Your name"
+												disabled={profileState.status === "saving"}
+											/>
 										</label>
 										<label className="block">
-											<span className="mb-1.5 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em]" style={{ color: "var(--text-tertiary)" }}>
+											<span
+												className="mb-1.5 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em]"
+												style={{ color: "var(--text-tertiary)" }}>
 												<Mail className="h-3.5 w-3.5" />
 												Email
 											</span>
-											<Input value={userEmail} disabled readOnly />
+											<Input value={accountEmailLabel} disabled readOnly />
 										</label>
 									</div>
 
 									<div className="mt-4 flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
 										<div
 											className="min-w-0 text-xs leading-relaxed"
-											style={{ color: profileState.status === "error" ? "#fca5a5" : profileState.status === "saved" ? "#86efac" : "var(--text-tertiary)" }}>
+											style={{
+												color:
+													profileState.status === "error"
+														? "#fca5a5"
+														: profileState.status === "saved"
+															? "#86efac"
+															: "var(--text-tertiary)",
+											}}>
 											{getStateMessage(profileState, "Changes will update your visible profile instantly.")}
 										</div>
 										<Button
@@ -296,7 +329,9 @@ export function AccountDialog({
 
 									<div className="mt-4">
 										<label className="block">
-											<span className="mb-1.5 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em]" style={{ color: "var(--text-tertiary)" }}>
+											<span
+												className="mb-1.5 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em]"
+												style={{ color: "var(--text-tertiary)" }}>
 												<BriefcaseBusiness className="h-3.5 w-3.5" />
 												Workspace name
 											</span>
@@ -312,7 +347,14 @@ export function AccountDialog({
 									<div className="mt-4 flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between md:gap-4">
 										<div
 											className="min-w-0 text-xs leading-relaxed"
-											style={{ color: workspaceState.status === "error" ? "#fca5a5" : workspaceState.status === "saved" ? "#86efac" : "var(--text-tertiary)" }}>
+											style={{
+												color:
+													workspaceState.status === "error"
+														? "#fca5a5"
+														: workspaceState.status === "saved"
+															? "#86efac"
+															: "var(--text-tertiary)",
+											}}>
 											{getStateMessage(workspaceState, "This keeps navigation and note context in sync.")}
 										</div>
 										<Button
@@ -326,26 +368,32 @@ export function AccountDialog({
 									</div>
 								</form>
 
-								<div className="rounded-[18px] border p-3.5 sm:p-4" style={{ borderColor: "var(--border-default)", backgroundColor: "rgba(255,255,255,0.02)" }}>
+								<div
+									className="rounded-[18px] border p-3.5 sm:p-4"
+									style={{ borderColor: "var(--border-default)", backgroundColor: "rgba(255,255,255,0.02)" }}>
 									<p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
 										Connected account
 									</p>
 									<div className="mt-3 grid gap-3 md:grid-cols-2">
-										<div className="rounded-[14px] border p-3" style={{ borderColor: "var(--border-default)", backgroundColor: "rgba(255,255,255,0.02)" }}>
+										<div
+											className="rounded-[14px] border p-3"
+											style={{ borderColor: "var(--border-default)", backgroundColor: "rgba(255,255,255,0.02)" }}>
 											<p className="text-[11px] uppercase tracking-[0.16em]" style={{ color: "var(--text-tertiary)" }}>
 												Provider
 											</p>
 											<p className="mt-1 flex items-center gap-2 text-sm" style={{ color: "var(--text-primary)" }}>
-												<BadgeCheck className="h-4 w-4" style={{ color: "var(--sn-accent)" }} />
+												{!isGuestUser && <BadgeCheck className="h-4 w-4" style={{ color: "var(--sn-accent)" }} />}
 												{providerLabel}
 											</p>
 										</div>
-										<div className="rounded-[14px] border p-3" style={{ borderColor: "var(--border-default)", backgroundColor: "rgba(255,255,255,0.02)" }}>
+										<div
+											className="rounded-[14px] border p-3"
+											style={{ borderColor: "var(--border-default)", backgroundColor: "rgba(255,255,255,0.02)" }}>
 											<p className="text-[11px] uppercase tracking-[0.16em]" style={{ color: "var(--text-tertiary)" }}>
 												Account email
 											</p>
 											<p className="mt-1 text-sm break-all" style={{ color: "var(--text-primary)" }}>
-												{userEmail}
+												{accountEmailLabel}
 											</p>
 										</div>
 									</div>

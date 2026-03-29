@@ -49,3 +49,6 @@ next-env.d.ts
 /.agents
 /.claude
 .vercel
+
+# Added by ggshield
+.cache_ggshield

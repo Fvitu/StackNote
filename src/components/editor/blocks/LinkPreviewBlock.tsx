@@ -27,7 +27,7 @@ export const linkPreviewBlockSpec = createReactBlockSpec(
   },
   {
     render: (props) => {
-      const isPreview = !props.editor.isEditable
+     const isPreview = !props.editor.isEditable
       const title = props.block.props.title || props.block.props.url || "Link"
       const description = props.block.props.description
       const siteName = props.block.props.siteName || getHostname(props.block.props.url)

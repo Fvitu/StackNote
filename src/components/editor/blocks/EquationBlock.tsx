@@ -1,12 +1,15 @@
+/* eslint-disable react-hooks/rules-of-hooks */
+
 "use client"
 
 import "katex/dist/katex.min.css"
 
-import { useMemo, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import katex from "katex"
 import { createReactBlockSpec, BlockContentWrapper } from "@blocknote/react"
 import { usePreviewMode } from "@/components/editor/blocks/PreviewModeContext"
 import { EQUATION_BLOCK_TYPE, getEquationBlockPropsFromElement } from "@/lib/editor-paste"
+import { normalizeLatexSource } from "@/lib/latex"
 
 export const equationBlockSpec = createReactBlockSpec(
   {
@@ -28,7 +31,7 @@ export const equationBlockSpec = createReactBlockSpec(
 
       const renderLatex = (source: string) => {
         try {
-          const html = katex.renderToString(source || "\\,", {
+          const html = katex.renderToString(normalizeLatexSource(source) || "\\,", {
             throwOnError: true,
             displayMode: props.block.props.displayMode,
           })
@@ -38,8 +41,8 @@ export const equationBlockSpec = createReactBlockSpec(
         }
       }
 
-      const preview = useMemo(() => renderLatex(draft), [draft, props.block.props.displayMode])
-      const persisted = useMemo(() => renderLatex(props.block.props.latex), [props.block.props.displayMode, props.block.props.latex])
+      const preview = renderLatex(draft)
+      const persisted = renderLatex(props.block.props.latex)
 
       if (isPreview) {
         return (

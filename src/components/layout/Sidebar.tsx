@@ -33,6 +33,7 @@ interface SidebarProps {
 	userEmail: string;
 	userName: string;
 	isGoogleUser: boolean;
+	isGuestUser: boolean;
 	tree: WorkspaceTree;
 	onRefresh: () => void;
 	onSearchOpen: () => void;
@@ -55,6 +56,7 @@ export function Sidebar({
 	userEmail,
 	userName,
 	isGoogleUser,
+	isGuestUser,
 	tree,
 	onRefresh,
 	onSearchOpen,
@@ -390,8 +392,10 @@ export function Sidebar({
 		);
 	};
 
-	const baseDisplayName = userName || userEmail || "User";
-	const displayName = isGoogleUser ? `${baseDisplayName} (Google)` : baseDisplayName;
+	const baseDisplayName = userName || (isGuestUser ? "Guest" : userEmail || "User");
+	const providerSuffix = isGuestUser ? " (Guest)" : isGoogleUser ? " (Google)" : "";
+	const displayName = `${baseDisplayName}${providerSuffix}`;
+	const displayEmail = isGuestUser ? "Temporary session" : userEmail;
 	const initials = displayName
 		.split(" ")
 		.map((w) => w[0])
@@ -413,7 +417,7 @@ export function Sidebar({
 			{/* Workspace header */}
 			<div className="flex h-12 items-center gap-2 px-3" style={{ borderBottom: "1px solid var(--border-default)" }}>
 				<DropdownMenu>
-					<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-[var(--sn-radius-sm)] px-1 py-1 transition-colors duration-150 hover:bg-[#1a1a1a]">
+					<DropdownMenuTrigger id={`workspace-menu-trigger-${workspaceId}`} className="flex min-w-0 flex-1 items-center gap-2 rounded-[var(--sn-radius-sm)] px-1 py-1 transition-colors duration-150 hover:bg-[#1a1a1a]">
 						<div
 							className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-xs font-semibold"
 							style={{
@@ -451,7 +455,7 @@ export function Sidebar({
 											{displayName}
 										</p>
 										<p className="truncate text-xs" style={{ color: "var(--text-tertiary)" }}>
-											{userEmail}
+											{displayEmail}
 										</p>
 									</div>
 								</div>

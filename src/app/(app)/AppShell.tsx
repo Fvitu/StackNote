@@ -22,38 +22,32 @@ import {
 } from "@/lib/tree-helpers"
 
 interface AppShellProps {
-  workspaceId: string
-  workspaceName: string
-  userEmail: string
-  userName: string
-  isGoogleUser: boolean
-  needsName: boolean
-  children: React.ReactNode
+	workspaceId: string;
+	workspaceName: string;
+	userEmail: string;
+	userName: string;
+	isGoogleUser: boolean;
+	isGuestUser: boolean;
+	needsName: boolean;
+	children: React.ReactNode;
 }
 
-function AppShellInner({
-  workspaceId,
-  workspaceName,
-  userEmail,
-  userName,
-  isGoogleUser,
-  needsName,
-}: Omit<AppShellProps, "children">) {
-  const [tree, setTree] = useState<WorkspaceTree>({ folders: [], rootNotes: [] })
-  const [optimisticTree, setOptimisticTree] = useState<WorkspaceTree>({ folders: [], rootNotes: [] })
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [showNameDialog, setShowNameDialog] = useState(needsName)
-  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
-  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
-  const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
-  const [currentUserName, setCurrentUserName] = useState(userName);
-  const [isSidebarPreviewOpen, setIsSidebarPreviewOpen] = useState(false);
-  const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
-  const [canUseSidebarPreview, setCanUseSidebarPreview] = useState(false);
-  const { state, setActiveNote, toggleFolder, toggleSidebar, setSidebarOpen } = useWorkspace();
-  const pendingActionsRef = useRef<number>(0)
+function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoogleUser, isGuestUser, needsName }: Omit<AppShellProps, "children">) {
+	const [tree, setTree] = useState<WorkspaceTree>({ folders: [], rootNotes: [] });
+	const [optimisticTree, setOptimisticTree] = useState<WorkspaceTree>({ folders: [], rootNotes: [] });
+	const [searchOpen, setSearchOpen] = useState(false);
+	const [showNameDialog, setShowNameDialog] = useState(needsName);
+	const [accountDialogOpen, setAccountDialogOpen] = useState(false);
+	const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+	const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
+	const [currentUserName, setCurrentUserName] = useState(userName);
+	const [isSidebarPreviewOpen, setIsSidebarPreviewOpen] = useState(false);
+	const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
+	const [canUseSidebarPreview, setCanUseSidebarPreview] = useState(false);
+	const { state, setActiveNote, toggleFolder, toggleSidebar, setSidebarOpen } = useWorkspace();
+	const pendingActionsRef = useRef<number>(0);
 
-  useEffect(() => {
+	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
 		const noteId = params.get("note");
 		const folderId = params.get("folder");
@@ -68,9 +62,9 @@ function AppShellInner({
 		}
 		// Intentionally run once to hydrate initial app state from URL.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+	}, []);
 
-  useEffect(() => {
+	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
 
 		if (state.activeNoteId) {
@@ -88,41 +82,41 @@ function AppShellInner({
 		const query = params.toString();
 		const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
 		window.history.replaceState(null, "", nextUrl);
-  }, [state.activeNoteId, activeFolderId]);
+	}, [state.activeNoteId, activeFolderId]);
 
-  const fetchTree = useCallback(async () => {
-    const res = await fetch(`/api/workspace/${workspaceId}/tree`)
-    if (res.ok) {
-      const data = await res.json()
-      setTree(data)
-      // Only update optimistic tree if no pending actions
-      if (pendingActionsRef.current === 0) {
-        setOptimisticTree(data)
-      }
-    }
-  }, [workspaceId])
+	const fetchTree = useCallback(async () => {
+		const res = await fetch(`/api/workspace/${workspaceId}/tree`);
+		if (res.ok) {
+			const data = await res.json();
+			setTree(data);
+			// Only update optimistic tree if no pending actions
+			if (pendingActionsRef.current === 0) {
+				setOptimisticTree(data);
+			}
+		}
+	}, [workspaceId]);
 
-  useEffect(() => {
-    fetchTree()
-  }, [fetchTree])
+	useEffect(() => {
+		fetchTree();
+	}, [fetchTree]);
 
-  const showSidebarPreview = useCallback(() => {
+	const showSidebarPreview = useCallback(() => {
 		if (state.isSidebarOpen) return;
 		setIsSidebarPreviewOpen(true);
-  }, [state.isSidebarOpen]);
+	}, [state.isSidebarOpen]);
 
-  const hideSidebarPreview = useCallback(() => {
+	const hideSidebarPreview = useCallback(() => {
 		if (state.isSidebarOpen) return;
 		setIsSidebarPreviewOpen(false);
-  }, [state.isSidebarOpen]);
+	}, [state.isSidebarOpen]);
 
-  useEffect(() => {
+	useEffect(() => {
 		if (state.isSidebarOpen) {
 			setIsSidebarPreviewOpen(false);
 		}
-  }, [state.isSidebarOpen]);
+	}, [state.isSidebarOpen]);
 
-  useEffect(() => {
+	useEffect(() => {
 		if (typeof window === "undefined") return;
 
 		const mobileQuery = window.matchMedia("(max-width: 767px)");
@@ -143,14 +137,14 @@ function AppShellInner({
 			mobileQuery.removeEventListener("change", updateViewportMode);
 			mediaQuery.removeEventListener("change", updateViewportMode);
 		};
-  }, []);
+	}, []);
 
-  const openSidebarDocked = useCallback(() => {
+	const openSidebarDocked = useCallback(() => {
 		setIsSidebarPreviewOpen(false);
 		setSidebarOpen(true);
-  }, [setSidebarOpen]);
+	}, [setSidebarOpen]);
 
-  const handleSidebarToggleButton = useCallback(() => {
+	const handleSidebarToggleButton = useCallback(() => {
 		if (isMobileSidebarMode) {
 			toggleSidebar();
 			return;
@@ -162,201 +156,201 @@ function AppShellInner({
 		}
 
 		openSidebarDocked();
-  }, [isMobileSidebarMode, openSidebarDocked, state.isSidebarOpen, toggleSidebar]);
+	}, [isMobileSidebarMode, openSidebarDocked, state.isSidebarOpen, toggleSidebar]);
 
-  // Optimistic action wrapper
-  const optimisticAction = useCallback(
-    async <T,>(
-      optimisticUpdate: (tree: WorkspaceTree) => WorkspaceTree,
-      serverAction: () => Promise<T>,
-      onSuccess?: (result: T) => void
-    ): Promise<T | null> => {
-      // Apply optimistic update immediately
-      setOptimisticTree((prev) => optimisticUpdate(prev))
-      pendingActionsRef.current++
+	// Optimistic action wrapper
+	const optimisticAction = useCallback(
+		async <T,>(
+			optimisticUpdate: (tree: WorkspaceTree) => WorkspaceTree,
+			serverAction: () => Promise<T>,
+			onSuccess?: (result: T) => void,
+		): Promise<T | null> => {
+			// Apply optimistic update immediately
+			setOptimisticTree((prev) => optimisticUpdate(prev));
+			pendingActionsRef.current++;
 
-      try {
-        const result = await serverAction()
-        if (onSuccess) onSuccess(result)
-        // Refresh from server
-        await fetchTree()
-        return result
-      } catch (error) {
-        console.error("Action failed:", error)
-        // Revert to server state
-        setOptimisticTree(tree)
-        return null
-      } finally {
-        pendingActionsRef.current--
-        if (pendingActionsRef.current === 0) {
-          // Sync with server when all actions complete
-          await fetchTree()
-        }
-      }
-    },
-    [tree, fetchTree]
-  )
+			try {
+				const result = await serverAction();
+				if (onSuccess) onSuccess(result);
+				// Refresh from server
+				await fetchTree();
+				return result;
+			} catch (error) {
+				console.error("Action failed:", error);
+				// Revert to server state
+				setOptimisticTree(tree);
+				return null;
+			} finally {
+				pendingActionsRef.current--;
+				if (pendingActionsRef.current === 0) {
+					// Sync with server when all actions complete
+					await fetchTree();
+				}
+			}
+		},
+		[tree, fetchTree],
+	);
 
-  // Optimistic create note
-  const handleCreateNote = useCallback(
-    async (folderId?: string) => {
-      const tempId = `temp-${Date.now()}`
-      const tempNote: NoteTreeItem = {
-			id: tempId,
-			title: "Untitled",
-			emoji: null,
-			type: "note",
-		};
+	// Optimistic create note
+	const handleCreateNote = useCallback(
+		async (folderId?: string) => {
+			const tempId = `temp-${Date.now()}`;
+			const tempNote: NoteTreeItem = {
+				id: tempId,
+				title: "Untitled",
+				emoji: null,
+				type: "note",
+			};
 
-      return optimisticAction(
-        (tree) => addNoteToTree(tree, tempNote, folderId),
-        async () => {
-          const res = await fetch("/api/notes", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workspaceId, folderId }),
-          })
-          if (!res.ok) throw new Error("Failed to create note")
-          return res.json()
-        },
-        (newNote) => {
-          setActiveNote(newNote.id)
-        }
-      )
-    },
-    [workspaceId, optimisticAction, setActiveNote]
-  )
+			return optimisticAction(
+				(tree) => addNoteToTree(tree, tempNote, folderId),
+				async () => {
+					const res = await fetch("/api/notes", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ workspaceId, folderId }),
+					});
+					if (!res.ok) throw new Error("Failed to create note");
+					return res.json();
+				},
+				(newNote) => {
+					setActiveNote(newNote.id);
+				},
+			);
+		},
+		[workspaceId, optimisticAction, setActiveNote],
+	);
 
-  // Optimistic create folder
-  const handleCreateFolder = useCallback(
-    async (parentId?: string) => {
-      const tempId = `temp-folder-${Date.now()}`
-      const tempFolder: FolderTreeItem = {
-			id: tempId,
-			name: "New Folder",
-			type: "folder",
-			children: [],
-			notes: [],
-		};
+	// Optimistic create folder
+	const handleCreateFolder = useCallback(
+		async (parentId?: string) => {
+			const tempId = `temp-folder-${Date.now()}`;
+			const tempFolder: FolderTreeItem = {
+				id: tempId,
+				name: "New Folder",
+				type: "folder",
+				children: [],
+				notes: [],
+			};
 
-      return optimisticAction(
-        (tree) => addFolderToTree(tree, tempFolder, parentId),
-        async () => {
-          const res = await fetch("/api/folders", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workspaceId, parentId, name: "New Folder" }),
-          })
-          if (!res.ok) throw new Error("Failed to create folder")
-          return res.json()
-        }
-      )
-    },
-    [workspaceId, optimisticAction]
-  )
+			return optimisticAction(
+				(tree) => addFolderToTree(tree, tempFolder, parentId),
+				async () => {
+					const res = await fetch("/api/folders", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ workspaceId, parentId, name: "New Folder" }),
+					});
+					if (!res.ok) throw new Error("Failed to create folder");
+					return res.json();
+				},
+			);
+		},
+		[workspaceId, optimisticAction],
+	);
 
-  // Optimistic delete note
-  const handleDeleteNote = useCallback(
-    async (noteId: string) => {
-      return optimisticAction(
-        (tree) => removeNoteFromTree(tree, noteId),
-        async () => {
-          const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" })
-          if (!res.ok) throw new Error("Failed to delete note")
-        }
-      )
-    },
-    [optimisticAction]
-  )
+	// Optimistic delete note
+	const handleDeleteNote = useCallback(
+		async (noteId: string) => {
+			return optimisticAction(
+				(tree) => removeNoteFromTree(tree, noteId),
+				async () => {
+					const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
+					if (!res.ok) throw new Error("Failed to delete note");
+				},
+			);
+		},
+		[optimisticAction],
+	);
 
-  // Optimistic delete folder
-  const handleDeleteFolder = useCallback(
-    async (folderId: string) => {
-      return optimisticAction(
-        (tree) => removeFolderFromTree(tree, folderId),
-        async () => {
-          const res = await fetch(`/api/folders/${folderId}`, { method: "DELETE" })
-          if (!res.ok) throw new Error("Failed to delete folder")
-        }
-      )
-    },
-    [optimisticAction]
-  )
+	// Optimistic delete folder
+	const handleDeleteFolder = useCallback(
+		async (folderId: string) => {
+			return optimisticAction(
+				(tree) => removeFolderFromTree(tree, folderId),
+				async () => {
+					const res = await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
+					if (!res.ok) throw new Error("Failed to delete folder");
+				},
+			);
+		},
+		[optimisticAction],
+	);
 
-  // Optimistic rename note
-  const handleRenameNote = useCallback(
-    async (noteId: string, title: string) => {
-      return optimisticAction(
-        (tree) => updateNoteInTree(tree, noteId, { title }),
-        async () => {
-          const res = await fetch(`/api/notes/${noteId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title }),
-          })
-          if (!res.ok) throw new Error("Failed to rename note")
-        }
-      )
-    },
-    [optimisticAction]
-  )
+	// Optimistic rename note
+	const handleRenameNote = useCallback(
+		async (noteId: string, title: string) => {
+			return optimisticAction(
+				(tree) => updateNoteInTree(tree, noteId, { title }),
+				async () => {
+					const res = await fetch(`/api/notes/${noteId}`, {
+						method: "PATCH",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ title }),
+					});
+					if (!res.ok) throw new Error("Failed to rename note");
+				},
+			);
+		},
+		[optimisticAction],
+	);
 
-  // Optimistic rename folder
-  const handleRenameFolder = useCallback(
-    async (folderId: string, name: string) => {
-      return optimisticAction(
-        (tree) => updateFolderInTree(tree, folderId, { name }),
-        async () => {
-          const res = await fetch(`/api/folders/${folderId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name }),
-          })
-          if (!res.ok) throw new Error("Failed to rename folder")
-        }
-      )
-    },
-    [optimisticAction]
-  )
+	// Optimistic rename folder
+	const handleRenameFolder = useCallback(
+		async (folderId: string, name: string) => {
+			return optimisticAction(
+				(tree) => updateFolderInTree(tree, folderId, { name }),
+				async () => {
+					const res = await fetch(`/api/folders/${folderId}`, {
+						method: "PATCH",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ name }),
+					});
+					if (!res.ok) throw new Error("Failed to rename folder");
+				},
+			);
+		},
+		[optimisticAction],
+	);
 
-  // Optimistic move note
-  const handleMoveNote = useCallback(
-    async (noteId: string, folderId: string | null) => {
-      return optimisticAction(
-        (tree) => moveNoteInTree(tree, noteId, folderId),
-        async () => {
-          const res = await fetch(`/api/notes/${noteId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ folderId }),
-          })
-          if (!res.ok) throw new Error("Failed to move note")
-        }
-      )
-    },
-    [optimisticAction]
-  )
+	// Optimistic move note
+	const handleMoveNote = useCallback(
+		async (noteId: string, folderId: string | null) => {
+			return optimisticAction(
+				(tree) => moveNoteInTree(tree, noteId, folderId),
+				async () => {
+					const res = await fetch(`/api/notes/${noteId}`, {
+						method: "PATCH",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ folderId }),
+					});
+					if (!res.ok) throw new Error("Failed to move note");
+				},
+			);
+		},
+		[optimisticAction],
+	);
 
-  // Optimistic move folder
-  const handleMoveFolder = useCallback(
-    async (folderId: string, parentId: string | null) => {
-      return optimisticAction(
-        (tree) => moveFolderInTree(tree, folderId, parentId),
-        async () => {
-          const res = await fetch(`/api/folders/${folderId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ parentId }),
-          })
-          if (!res.ok) throw new Error("Failed to move folder")
-        }
-      )
-    },
-    [optimisticAction]
-  )
+	// Optimistic move folder
+	const handleMoveFolder = useCallback(
+		async (folderId: string, parentId: string | null) => {
+			return optimisticAction(
+				(tree) => moveFolderInTree(tree, folderId, parentId),
+				async () => {
+					const res = await fetch(`/api/folders/${folderId}`, {
+						method: "PATCH",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ parentId }),
+					});
+					if (!res.ok) throw new Error("Failed to move folder");
+				},
+			);
+		},
+		[optimisticAction],
+	);
 
-  // Handle name submission for magic link users
-  const updateUserName = useCallback(async (name: string) => {
+	// Handle name submission for magic link users
+	const updateUserName = useCallback(async (name: string) => {
 		try {
 			const res = await fetch("/api/user/name", {
 				method: "PATCH",
@@ -374,9 +368,9 @@ function AppShellInner({
 			console.error("Failed to update name:", error);
 			throw error;
 		}
-  }, []);
+	}, []);
 
-  const updateWorkspaceName = useCallback(
+	const updateWorkspaceName = useCallback(
 		async (name: string) => {
 			try {
 				const res = await fetch(`/api/workspace/${workspaceId}`, {
@@ -397,9 +391,9 @@ function AppShellInner({
 			}
 		},
 		[workspaceId, fetchTree],
-  );
+	);
 
-  const handleNameSubmit = useCallback(
+	const handleNameSubmit = useCallback(
 		async (name: string) => {
 			try {
 				await updateUserName(name);
@@ -410,18 +404,19 @@ function AppShellInner({
 			}
 		},
 		[updateUserName],
-  );
+	);
 
-  useKeyboardShortcut("k", () => setSearchOpen((v) => !v), { metaOrCtrl: true, preventDefault: true });
-  useKeyboardShortcut("\\", () => toggleSidebar(), { metaOrCtrl: true, preventDefault: true });
+	useKeyboardShortcut("k", () => setSearchOpen((v) => !v), { metaOrCtrl: true, preventDefault: true });
+	useKeyboardShortcut("\\", () => toggleSidebar(), { metaOrCtrl: true, preventDefault: true });
 
-  const sidebarProps = useMemo(
+	const sidebarProps = useMemo(
 		() => ({
 			workspaceId,
 			workspaceName: currentWorkspaceName,
 			userEmail,
 			userName: currentUserName,
 			isGoogleUser,
+			isGuestUser,
 			tree: optimisticTree,
 			onRefresh: fetchTree,
 			onSearchOpen: () => setSearchOpen(true),
@@ -448,6 +443,7 @@ function AppShellInner({
 			userEmail,
 			currentUserName,
 			isGoogleUser,
+			isGuestUser,
 			optimisticTree,
 			fetchTree,
 			handleCreateNote,
@@ -462,9 +458,9 @@ function AppShellInner({
 			setSidebarOpen,
 			setAccountDialogOpen,
 		],
-  );
+	);
 
-  useEffect(() => {
+	useEffect(() => {
 		const onEscape = (event: KeyboardEvent) => {
 			if (event.key === "Escape") {
 				setSearchOpen(false);
@@ -473,9 +469,9 @@ function AppShellInner({
 
 		window.addEventListener("keydown", onEscape);
 		return () => window.removeEventListener("keydown", onEscape);
-  }, []);
+	}, []);
 
-  return (
+	return (
 		<div className="relative flex h-screen overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
 			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && (
 				<div className="sidebar-preview-trigger" onMouseEnter={showSidebarPreview} aria-hidden="true" />
@@ -534,33 +530,28 @@ function AppShellInner({
 				userEmail={userEmail}
 				workspaceName={currentWorkspaceName}
 				isGoogleUser={isGoogleUser}
+				isGuestUser={isGuestUser}
 				onClose={() => setAccountDialogOpen(false)}
 				onSaveUserName={updateUserName}
 				onSaveWorkspaceName={updateWorkspaceName}
 			/>
 			<NameCaptureDialog open={showNameDialog} onNameSubmit={handleNameSubmit} />
 		</div>
-  );
+	);
 }
 
-export function AppShell({
-  workspaceId,
-  workspaceName,
-  userEmail,
-  userName,
-  isGoogleUser,
-  needsName,
-}: AppShellProps) {
-  return (
-    <WorkspaceProvider>
-      <AppShellInner
-        workspaceId={workspaceId}
-        workspaceName={workspaceName}
-        userEmail={userEmail}
-        userName={userName}
-        isGoogleUser={isGoogleUser}
-        needsName={needsName}
-      />
-    </WorkspaceProvider>
-  )
+export function AppShell({ workspaceId, workspaceName, userEmail, userName, isGoogleUser, isGuestUser, needsName }: AppShellProps) {
+	return (
+		<WorkspaceProvider>
+			<AppShellInner
+				workspaceId={workspaceId}
+				workspaceName={workspaceName}
+				userEmail={userEmail}
+				userName={userName}
+				isGoogleUser={isGoogleUser}
+				isGuestUser={isGuestUser}
+				needsName={needsName}
+			/>
+		</WorkspaceProvider>
+	);
 }

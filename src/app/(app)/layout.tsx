@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { ensureDbReady } from "@/lib/dbInit";
 import { AppShell } from "./AppShell"
 
 export default async function AppLayout({
@@ -13,6 +14,8 @@ export default async function AppLayout({
   if (!session?.user?.id) {
     redirect("/login?reason=session-expired");
   }
+
+  await ensureDbReady(prisma);
 
   const workspace = await prisma.workspace.findFirst({
     where: { userId: session.user.id },
@@ -33,19 +36,21 @@ export default async function AppLayout({
 
   const user = await prisma.user.findUnique({
 		where: { id: session.user.id },
-		select: { name: true, email: true },
+		select: { name: true, email: true, isGuest: true, guestLastActiveAt: true },
   });
 
   // Check if user needs to provide name (magic link users without name)
-  const needsName = !user?.name && !googleAccount;
+  const isGuestUser = Boolean(user?.isGuest);
+  const needsName = !isGuestUser && !user?.name && !googleAccount;
 
   return (
 		<AppShell
 			workspaceId={workspace.id}
 			workspaceName={workspace.name}
-			userEmail={user?.email ?? session.user.email ?? ""}
+			userEmail={isGuestUser ? "" : (user?.email ?? session.user.email ?? "")}
 			userName={user?.name ?? ""}
 			isGoogleUser={!!googleAccount}
+			isGuestUser={isGuestUser}
 			needsName={needsName}>
 			{children}
 		</AppShell>

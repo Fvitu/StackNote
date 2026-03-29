@@ -5,21 +5,32 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
-  id            String      @id @default(cuid())
-  email         String      @unique
-  name          String?
-  image         String?
-  emailVerified DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  accounts      Account[]
-  sessions      Session[]
-  workspaces    Workspace[]
-  files         File[]
+  id             String          @id @default(cuid())
+  email          String          @unique
+  name           String?
+  image          String?
+  emailVerified  DateTime?
+  isGuest        Boolean         @default(false)
+  guestLastActiveAt DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  accounts       Account[]
+  sessions       Session[]
+  workspaces     Workspace[]
+  files          File[]
+  aiUsage        AIUsage[]
+  aiQuotaWindows AIQuotaWindow[]
+  aiChatSessions AIChatSession[]
+  aiMessages     AIMessage[]
+  flashcardDecks FlashcardDeck[]
+  settings       UserSettings?
 
+  @@index([isGuest, guestLastActiveAt])
   @@map("users")
 }
 
@@ -69,6 +80,7 @@ model Workspace {
   updatedAt DateTime @updatedAt
   folders   Folder[]
   notes     Note[]
+  aiChatSessions AIChatSession[]
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("workspaces")
@@ -91,23 +103,26 @@ model Folder {
 }
 
 model Note {
-  id          String        @id @default(cuid())
-  title       String        @default("Untitled")
-  content     Json?
-  workspaceId String
-  folderId    String?
-  emoji       String?
-  coverImage  String?
+  id             String          @id @default(cuid())
+  title          String          @default("Untitled")
+  content        Json?
+  workspaceId    String
+  folderId       String?
+  emoji          String?
+  coverImage     String?
   coverImageMeta Json?
-  isArchived  Boolean       @default(false)
-  order       Int           @default(0)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  versions    NoteVersion[]
-  files       File[]
-  searchVector Unsupported("tsvector")?
-  folder      Folder?       @relation(fields: [folderId], references: [id])
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  isArchived     Boolean         @default(false)
+  order          Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  versions       NoteVersion[]
+  files          File[]
+  aiMessages     AIMessage[]
+  aiChatSessions AIChatSession[]
+  flashcardDecks FlashcardDeck[]
+  searchVector   Unsupported("tsvector")?
+  folder         Folder?         @relation(fields: [folderId], references: [id])
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([searchVector], type: Gin)
   @@map("notes")
@@ -142,4 +157,127 @@ model File {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("files")
+}
+
+model AIUsage {
+  id           String   @id @default(cuid())
+  userId       String
+  date         String   // "YYYY-MM-DD" format — resets daily
+  textTokens   Int      @default(0)
+  sttMinutes   Float    @default(0)
+  messageCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("ai_usage")
+}
+
+model AIQuotaWindow {
+  id              String   @id @default(cuid())
+  userId          String
+  category        String
+  modelKey        String
+  windowStartedAt DateTime
+  windowEndsAt    DateTime
+  requestCount    Int      @default(0)
+  tokenCount      Int      @default(0)
+  flashcardCount  Int      @default(0)
+  audioSeconds    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, modelKey])
+  @@index([userId, category, modelKey, windowEndsAt])
+  @@map("ai_quota_windows")
+}
+
+model AIMessage {
+  id         String         @id @default(cuid())
+  userId     String
+  sessionId  String?
+  noteId     String?
+  role       String         // "user" | "assistant"
+  content    String         @db.Text
+  model      String
+  tokensUsed Int            @default(0)
+  createdAt  DateTime       @default(now())
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session AIChatSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  note    Note?         @relation(fields: [noteId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, createdAt])
+  @@map("ai_messages")
+}
+
+model AIChatSession {
+  id             String      @id @default(cuid())
+  userId         String
+  workspaceId    String
+  noteId         String?
+  title          String      @default("New chat")
+  contextNoteIds String[]
+  lastMessageAt  DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  note      Note?         @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  messages  AIMessage[]
+
+  @@index([userId, workspaceId, noteId, lastMessageAt])
+  @@map("ai_chat_sessions")
+}
+
+model Flashcard {
+  id         String        @id @default(cuid())
+  deckId     String
+  front      String        @db.Text
+  back       String        @db.Text
+  stability  Float         @default(0)
+  difficulty Float         @default(0)
+  reps       Int           @default(0)
+  lapses     Int           @default(0)
+  state      Int           @default(0) // 0=new, 1=learning, 2=review, 3=relearning
+  dueDate    DateTime      @default(now())
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  deck FlashcardDeck @relation(fields: [deckId], references: [id], onDelete: Cascade)
+
+  @@map("flashcards")
+}
+
+model FlashcardDeck {
+  id          String      @id @default(cuid())
+  userId      String
+  noteId      String?
+  title       String
+  description String?
+  cardCount   Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  note       Note?       @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  flashcards Flashcard[]
+
+  @@map("flashcard_decks")
+}
+
+model UserSettings {
+  id                 String @id @default(cuid())
+  userId             String @unique
+  preferredTextModel String @default("openai/gpt-oss-120b")
+  preferredSttModel  String @default("whisper-large-v3")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
 }

@@ -1,15 +1,50 @@
+/* eslint-disable react-hooks/rules-of-hooks */
+
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { Play, Pause, Volume2, VolumeX } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Play, Pause, Volume2, VolumeX, Sparkles, Loader2 } from "lucide-react";
 import { createReactBlockSpec, BlockContentWrapper } from "@blocknote/react"
+import { UsageIndicator } from "@/components/ai/UsageIndicator"
 import { usePreviewMode } from "@/components/editor/blocks/PreviewModeContext"
+import { readErrorMessage, readJsonResponse } from "@/lib/http"
+import { notifyAiUsageChanged } from "@/lib/ai-usage-events"
+import { DEFAULT_STT_MODEL, isValidSttModel } from "@/lib/groq-models"
 
 function formatSeconds(seconds: number) {
   if (!Number.isFinite(seconds)) return "0:00"
   const mins = Math.floor(seconds / 60)
   const secs = Math.floor(seconds % 60)
   return `${mins}:${secs.toString().padStart(2, "0")}`
+}
+
+function parseTranscriptBlockIds(value: string): string[] {
+  if (!value) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string" && item.length > 0)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function splitTranscriptIntoParagraphs(transcript: string): string[] {
+  const normalized = transcript.replace(/\r\n?/g, "\n").trim()
+  if (!normalized) {
+    return []
+  }
+
+  const paragraphs = normalized
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+
+  return paragraphs.length > 0 ? paragraphs : [normalized]
 }
 
 export const audioMediaBlockSpec = createReactBlockSpec(
@@ -23,6 +58,7 @@ export const audioMediaBlockSpec = createReactBlockSpec(
       uploading: { default: false, type: "boolean" as const },
       progress: { default: 0, type: "number" as const },
       error: { default: "" },
+      transcriptBlockIds: { default: "" },
     },
     content: "none",
   },
@@ -37,7 +73,122 @@ export const audioMediaBlockSpec = createReactBlockSpec(
       const [duration, setDuration] = useState(props.block.props.duration ?? 0)
       const [volume, setVolume] = useState(0.8)
       const [showVolume, setShowVolume] = useState(false)
+      const [isTranscribing, setIsTranscribing] = useState(false)
+      const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
+      const [sttModel, setSttModel] = useState(DEFAULT_STT_MODEL)
       const isPreview = usePreviewMode()
+      const transcriptBlockIds = parseTranscriptBlockIds(props.block.props.transcriptBlockIds)
+      const hasTranscript = transcriptBlockIds.length > 0
+
+      useEffect(() => {
+        let mounted = true
+
+        async function loadPreferredTranscriptionModel() {
+          try {
+            const response = await fetch("/api/settings")
+            const result = await readJsonResponse<{ preferredSttModel?: string }>(response)
+            if (!mounted || !response.ok || !result?.preferredSttModel || !isValidSttModel(result.preferredSttModel)) {
+              return
+            }
+
+            setSttModel(result.preferredSttModel)
+          } catch {
+            // Keep the default model badge if settings are unavailable.
+          }
+        }
+
+        void loadPreferredTranscriptionModel()
+
+        return () => {
+          mounted = false
+        }
+      }, [])
+
+      const handleTranscribe = useCallback(async () => {
+        if (isTranscribing || !props.block.props.url) return
+
+        setIsTranscribing(true)
+        setTranscriptionError(null)
+
+        try {
+          // Fetch the audio file from the URL
+          const audioResponse = await fetch(props.block.props.url)
+          if (!audioResponse.ok) {
+            throw new Error("Failed to fetch audio file")
+          }
+
+          const audioBlob = await audioResponse.blob()
+          const audioFile = new File(
+            [audioBlob],
+            props.block.props.filename || "audio.mp3",
+            { type: audioBlob.type || "audio/mpeg" }
+          )
+
+          // Create form data for the transcription API
+          const formData = new FormData()
+          formData.append("audio", audioFile)
+          formData.append("noteTitle", props.block.props.filename || "Audio Transcription")
+
+          // Call the transcription API
+          const response = await fetch("/api/ai/transcribe", {
+            method: "POST",
+            body: formData,
+          })
+
+          if (!response.ok) {
+            throw new Error(await readErrorMessage(response, "Transcription failed"))
+          }
+
+          const result = await readJsonResponse<{ transcript?: string }>(response)
+          if (!result) {
+            throw new Error("Transcription returned an empty response")
+          }
+
+          const transcript = result.transcript?.trim() ?? ""
+          const paragraphs = splitTranscriptIntoParagraphs(transcript)
+          if (paragraphs.length === 0) {
+            throw new Error("Transcription returned an empty transcript")
+          }
+
+          const existingTranscriptBlocks = parseTranscriptBlockIds(props.block.props.transcriptBlockIds)
+            .map((blockId) => props.editor.getBlock(blockId))
+            .filter((block): block is NonNullable<typeof block> => block !== undefined)
+
+          if (existingTranscriptBlocks.length > 0) {
+            props.editor.removeBlocks(existingTranscriptBlocks)
+          }
+
+          const insertedBlocks = props.editor.insertBlocks(
+            [
+              {
+                type: "heading",
+                props: { level: 2 },
+                content: "Transcript",
+              },
+              ...paragraphs.map((paragraph) => ({
+                type: "paragraph" as const,
+                content: paragraph,
+              })),
+            ] as unknown as Parameters<typeof props.editor.insertBlocks>[0],
+            props.block,
+            "after"
+          )
+
+          props.editor.updateBlock(props.block, {
+            type: "audioMedia",
+            props: {
+              ...props.block.props,
+              transcriptBlockIds: JSON.stringify(insertedBlocks.map((block) => block.id)),
+            },
+          })
+
+          notifyAiUsageChanged()
+        } catch (error) {
+          setTranscriptionError(error instanceof Error ? error.message : "Transcription failed")
+        } finally {
+          setIsTranscribing(false)
+        }
+      }, [isTranscribing, props])
 
       if (isPreview) {
         return (
@@ -182,6 +333,30 @@ export const audioMediaBlockSpec = createReactBlockSpec(
                   background: `linear-gradient(to right, var(--sn-accent) ${Math.round(volume * 100)}%, rgba(255,255,255,0.08) ${Math.round(volume * 100)}%)`,
                 }}
               />
+            </div>
+
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={handleTranscribe}
+                disabled={isTranscribing || !props.block.props.url}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[#1a1a1a] disabled:opacity-50"
+                style={{ color: transcriptionError ? "#ef4444" : "var(--text-tertiary)" }}
+                title={transcriptionError || (hasTranscript ? "Reapply transcription" : "Transcribe audio with AI")}
+              >
+                {isTranscribing ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Transcribing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-3 w-3" />
+                    <span>{hasTranscript ? "Re-transcribe" : "Transcribe"}</span>
+                  </>
+                )}
+              </button>
+              <UsageIndicator model={sttModel} category="voice" />
             </div>
           </div>
         </BlockContentWrapper>

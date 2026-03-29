@@ -2,14 +2,27 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useCallback, useEffect, forwardRef, useImperativeHandle, useMemo, useRef, useState, type WheelEvent } from "react";
-import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, useExtensionState } from "@blocknote/react";
+import {
+	useCreateBlockNote,
+	SuggestionMenuController,
+	getDefaultReactSlashMenuItems,
+	useExtensionState,
+	FormattingToolbar,
+	FormattingToolbarController,
+	getFormattingToolbarItems,
+	FileReplaceButton,
+	FileRenameButton,
+	useBlockNoteEditor,
+	useComponentsContext,
+	useEditorState,
+} from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from "@blocknote/core";
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu, SuggestionMenu as SuggestionMenuExtension } from "@blocknote/core/extensions";
 import { offset, shift, size } from "@floating-ui/react";
 import type { DefaultReactSuggestionItem } from "@blocknote/react";
-import { ImageIcon, FileText, Music, Video, Sigma, Code } from "lucide-react";
+import { ImageIcon, FileText, Music, Video, Sigma, Code, Download, Sparkles } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { customBlockSpecs } from "@/components/editor/blocks";
 import { customInlineContentSpecs } from "@/components/editor/inline";
@@ -17,6 +30,7 @@ import { getAcceptForType, getMediaTypeFromFile, parseVideoEmbedUrl, type MediaT
 import { uploadFileForNote } from "@/lib/upload";
 import { useFileDrop } from "@/hooks/useFileDrop";
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
+import { convertPlainTextToEditorHtml, parseRichTextToBlocks, shouldPreferPlainTextPaste, transformExternalHtmlForEditor } from "@/lib/editor-paste";
 
 const SINGLE_URL_REGEX = /^https?:\/\/[^\s]+$/i;
 
@@ -60,6 +74,146 @@ type LinkPreviewApiPayload = {
 };
 
 type PartialEditorBlock = Record<string, unknown>;
+
+type SelectedFileContext = {
+	blockType: string;
+	fileId: string;
+	fileName: string;
+};
+
+type BlockInsertPosition = {
+	referenceBlockId: string;
+	placement: "before" | "after";
+};
+
+type Point = {
+	x: number;
+	y: number;
+};
+
+const REPLACE_HIDDEN_BLOCK_TYPES = new Set(["imageMedia", "pdfMedia", "audioMedia"]);
+const RENAME_HIDDEN_BLOCK_TYPES = new Set(["imageMedia"]);
+
+function useSelectedFileContext(): SelectedFileContext | null {
+	const editor = useBlockNoteEditor<any, any, any>();
+
+	return useEditorState<SelectedFileContext | null>({
+		editor,
+		on: "selection",
+		selector: ({ editor: currentEditor }) => {
+			if (!currentEditor || !currentEditor.isEditable) {
+				return null;
+			}
+
+			const selectedBlocks = currentEditor.getSelection()?.blocks || [currentEditor.getTextCursorPosition().block];
+			if (selectedBlocks.length !== 1) {
+				return null;
+			}
+
+			const block = selectedBlocks[0] as {
+				type: string;
+				props?: Record<string, unknown>;
+			};
+			const props = block.props;
+			if (!props || typeof props.url !== "string" || props.url.length === 0) {
+				return null;
+			}
+
+			const fileId = typeof props.fileId === "string" ? props.fileId : "";
+			if (!fileId) {
+				return null;
+			}
+
+			const fileNameFromProps =
+				typeof props.name === "string"
+					? props.name
+					: typeof props.filename === "string"
+						? props.filename
+						: typeof props.alt === "string"
+							? props.alt
+							: "download";
+
+			return {
+				blockType: block.type,
+				fileId,
+				fileName: fileNameFromProps,
+			};
+		},
+	});
+}
+
+function ConditionalFileReplaceButton() {
+	const selectedFile = useSelectedFileContext();
+
+	if (selectedFile && REPLACE_HIDDEN_BLOCK_TYPES.has(selectedFile.blockType)) {
+		return null;
+	}
+
+	return <FileReplaceButton />;
+}
+
+function ConditionalFileRenameButton() {
+	const selectedFile = useSelectedFileContext();
+
+	if (selectedFile && RENAME_HIDDEN_BLOCK_TYPES.has(selectedFile.blockType)) {
+		return null;
+	}
+
+	return <FileRenameButton />;
+}
+
+function ImmediateFileDownloadButton() {
+	const selectedFile = useSelectedFileContext();
+	const Components = useComponentsContext();
+
+	if (!selectedFile || !Components) {
+		return null;
+	}
+
+	return (
+		<Components.FormattingToolbar.Button
+			className="bn-button"
+			label="Download file"
+			mainTooltip="Download file"
+			icon={<Download size={18} />}
+			onClick={() => {
+				const anchor = document.createElement("a");
+				anchor.href = `/api/files/${encodeURIComponent(selectedFile.fileId)}?download=1`;
+				anchor.download = selectedFile.fileName;
+				anchor.rel = "noopener";
+				document.body.append(anchor);
+				anchor.click();
+				anchor.remove();
+			}}
+		/>
+	);
+}
+
+function CustomFormattingToolbar() {
+	const toolbarItems = useMemo(
+		() =>
+			getFormattingToolbarItems().map((item) => {
+				const key = String(item.key ?? "");
+
+				if (key.includes("replaceFileButton")) {
+					return <ConditionalFileReplaceButton key={key} />;
+				}
+
+				if (key.includes("fileRenameButton")) {
+					return <ConditionalFileRenameButton key={key} />;
+				}
+
+				if (key.includes("fileDownloadButton")) {
+					return <ImmediateFileDownloadButton key={key} />;
+				}
+
+				return item;
+			}),
+		[],
+	);
+
+	return <FormattingToolbar>{toolbarItems}</FormattingToolbar>;
+}
 
 function extractUrlTransformParts(blockText: string): UrlTransformParts | null {
 	const normalized = blockText.replace(/\r\n?/g, "\n");
@@ -213,6 +367,7 @@ function getClipboardImageFiles(clipboard: DataTransfer): File[] {
 }
 
 interface NoteEditorProps {
+	workspaceId: string;
 	noteId: string;
 	initialContent: unknown;
 	onSave: (content: unknown) => Promise<void>;
@@ -224,6 +379,11 @@ export interface NoteEditorRef {
 	redo: () => void;
 	canUndo: () => boolean;
 	canRedo: () => boolean;
+	appendMarkdownToEnd: (markdown: string) => boolean;
+	beginBlockSelection: (clientX: number, clientY: number) => void;
+	updateBlockSelection: (clientX: number, clientY: number, source?: "pointer" | "scroll") => void;
+	clearBlockSelection: () => void;
+	deleteSelectedBlocks: () => boolean;
 }
 
 function groupSlashItems(items: readonly DefaultReactSuggestionItem[]): DefaultReactSuggestionItem[] {
@@ -266,11 +426,125 @@ function getVerticalBoundaryRect(element: Element | null): DOMRect {
 	return new DOMRect(0, 0, window.innerWidth, window.innerHeight);
 }
 
-export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, initialContent, onSave, onContentChange }, ref) => {
+function isTextInputElement(element: EventTarget | null): boolean {
+	if (!(element instanceof HTMLElement)) {
+		return false;
+	}
+
+	return Boolean(element.closest('input, textarea, select, button, a, [contenteditable="true"], .mantine-Menu-dropdown, iframe, audio'));
+}
+
+function getBlockElements(root: HTMLElement): HTMLElement[] {
+	return Array.from(root.querySelectorAll<HTMLElement>(".bn-block-outer[data-id]"));
+}
+
+function getBlockElementById(root: HTMLElement, blockId: string): HTMLElement | null {
+	return root.querySelector<HTMLElement>(`.bn-block-outer[data-id="${blockId}"]`);
+}
+
+function getOrderedBlockIds(root: HTMLElement): string[] {
+	return getBlockElements(root)
+		.map((element) => element.dataset.id)
+		.filter((id): id is string => Boolean(id));
+}
+
+function getBlockSelectionRect(startPoint: Point, currentPoint: Point): DOMRect {
+	const left = Math.min(startPoint.x, currentPoint.x);
+	const right = Math.max(startPoint.x, currentPoint.x);
+	const top = Math.min(startPoint.y, currentPoint.y);
+	const bottom = Math.max(startPoint.y, currentPoint.y);
+
+	return new DOMRect(left, top, right - left, bottom - top);
+}
+
+function getTopLevelSelectedBlockIds(root: HTMLElement, blockIds: string[]): string[] {
+	const selectedBlockIds = Array.from(new Set(blockIds));
+	const selectedBlockIdSet = new Set(selectedBlockIds);
+
+	return selectedBlockIds.filter((blockId) => {
+		const element = getBlockElementById(root, blockId);
+		if (!element) {
+			return false;
+		}
+
+		let ancestor = element.parentElement?.closest<HTMLElement>(".bn-block-outer[data-id]") ?? null;
+		while (ancestor) {
+			const ancestorId = ancestor.dataset.id;
+			if (ancestorId && selectedBlockIdSet.has(ancestorId)) {
+				return false;
+			}
+
+			ancestor = ancestor.parentElement?.closest<HTMLElement>(".bn-block-outer[data-id]") ?? null;
+		}
+
+		return true;
+	});
+}
+
+function rectsIntersect(a: DOMRect, b: DOMRect): boolean {
+	return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
+}
+
+function getBlockIdsIntersectingRect(root: HTMLElement, rect: DOMRect): string[] {
+	return getBlockElements(root)
+		.filter((element) => rectsIntersect(rect, element.getBoundingClientRect()))
+		.map((element) => element.dataset.id)
+		.filter((id): id is string => Boolean(id));
+}
+
+function getBlockSelectionRange(root: HTMLElement, anchorId: string, endpointId: string): string[] {
+	const orderedBlockIds = getOrderedBlockIds(root);
+	const anchorIndex = orderedBlockIds.indexOf(anchorId);
+	const endpointIndex = orderedBlockIds.indexOf(endpointId);
+
+	if (anchorIndex === -1 || endpointIndex === -1) {
+		return [];
+	}
+
+	const startIndex = Math.min(anchorIndex, endpointIndex);
+	const endIndex = Math.max(anchorIndex, endpointIndex);
+	return orderedBlockIds.slice(startIndex, endIndex + 1);
+}
+
+function getDropInsertionPosition(root: HTMLElement, clientX: number, clientY: number): BlockInsertPosition | null {
+	const blockElements = getBlockElements(root);
+	if (blockElements.length === 0) {
+		return null;
+	}
+
+	let closestBlock: HTMLElement | null = null;
+	let closestDistance = Number.POSITIVE_INFINITY;
+
+	for (const element of blockElements) {
+		const rect = element.getBoundingClientRect();
+		const distance = Math.abs(clientY - (rect.top + rect.height / 2));
+		if (distance < closestDistance) {
+			closestBlock = element;
+			closestDistance = distance;
+		}
+	}
+
+	if (!closestBlock?.dataset.id) {
+		return null;
+	}
+
+	const rect = closestBlock.getBoundingClientRect();
+	return {
+		referenceBlockId: closestBlock.dataset.id,
+		placement: clientY < rect.top + rect.height / 2 ? "before" : "after",
+	};
+}
+
+export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspaceId, noteId, initialContent, onSave, onContentChange }, ref) => {
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const editorRootRef = useRef<HTMLDivElement | null>(null);
 	const uploadTypeRef = useRef<MediaType>("image");
 	const pendingLinkPreviewRef = useRef<Set<string>>(new Set());
+	const blockSelectionKeyRef = useRef("");
+	const blockSelectionStartPointRef = useRef<Point | null>(null);
+	const blockSelectionAnchorIdRef = useRef<string | null>(null);
 	const [pickerType, setPickerType] = useState<MediaType>("image");
+	const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
 
 	const editorSchema = useMemo(
 		() =>
@@ -306,8 +580,23 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 					return true;
 				}
 
-				const blockIdBeforePaste = editor.getTextCursorPosition().block.id;
 				const plainText = clipboard.getData("text/plain");
+				const html = clipboard.getData("text/html");
+				const shouldNormalizeRichHtml =
+					Boolean(html) &&
+					(html.includes("$") || html.includes("\\(") || html.includes("\\[") || (plainText && shouldPreferPlainTextPaste(plainText)));
+
+				if (shouldNormalizeRichHtml) {
+					editor.pasteHTML(transformExternalHtmlForEditor(html));
+					return true;
+				}
+
+				if (plainText && shouldPreferPlainTextPaste(plainText)) {
+					editor.pasteHTML(convertPlainTextToEditorHtml(plainText));
+					return true;
+				}
+
+				const blockIdBeforePaste = editor.getTextCursorPosition().block.id;
 				const shouldAttemptLinkPreview = Boolean(plainText && extractUrlTransformParts(plainText));
 				const handled = defaultPasteHandler();
 
@@ -456,12 +745,12 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 	}, [editor, transformUrlBlockToEmbed]);
 
 	const uploadSingleFile = useCallback(
-		async (file: File, type: MediaType) => {
+		async (file: File, type: MediaType, insertPosition?: BlockInsertPosition) => {
 			const cursorBlock = editor.getTextCursorPosition().block;
 
-			const placeholder =
+			const placeholderBlock =
 				type === "image"
-					? insertOrUpdateBlockForSlashMenu(editor, {
+					? {
 							type: "imageMedia",
 							props: {
 								url: "",
@@ -474,9 +763,9 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 								progress: 10,
 								error: "",
 							},
-						} as any)
+						}
 					: type === "pdf"
-						? insertOrUpdateBlockForSlashMenu(editor, {
+						? {
 								type: "pdfMedia",
 								props: {
 									url: "",
@@ -487,9 +776,9 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 									progress: 10,
 									error: "",
 								},
-							} as any)
+							}
 						: type === "audio"
-							? insertOrUpdateBlockForSlashMenu(editor, {
+							? {
 									type: "audioMedia",
 									props: {
 										url: "",
@@ -499,8 +788,8 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 										progress: 10,
 										error: "",
 									},
-								} as any)
-							: insertOrUpdateBlockForSlashMenu(editor, {
+								}
+							: {
 									type: "video",
 									props: {
 										url: "",
@@ -508,7 +797,11 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 										showPreview: true,
 										caption: "",
 									},
-								});
+								};
+
+			const placeholder = insertPosition
+				? editor.insertBlocks([placeholderBlock] as any, insertPosition.referenceBlockId, insertPosition.placement)[0]
+				: insertOrUpdateBlockForSlashMenu(editor, placeholderBlock as any);
 
 			let simulated = 10;
 			const timer = window.setInterval(() => {
@@ -676,6 +969,22 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 		} as any);
 	}, [editor]);
 
+	const insertAIBlock = useCallback(() => {
+		insertOrUpdateBlockForSlashMenu(editor, {
+			type: "aiBlock",
+			props: {
+				prompt: "",
+				response: "",
+				workspaceId,
+				sessionId: "",
+				noteId,
+				model: "openai/gpt-oss-120b",
+				status: "idle",
+				error: "",
+			},
+		} as any);
+	}, [editor, noteId, workspaceId]);
+
 	const mediaSlashItems = useMemo<DefaultReactSuggestionItem[]>(() => {
 		return [
 			{
@@ -720,8 +1029,15 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 				group: "Advanced",
 				onItemClick: insertCodeBlock,
 			},
+			{
+				title: "Ask AI",
+				subtext: "Ask AI to generate content",
+				icon: <Sparkles size={16} />,
+				group: "AI",
+				onItemClick: insertAIBlock,
+			},
 		];
-	}, [insertCodeBlock, insertEquation, insertVideoEmbed, openUploadPicker]);
+	}, [insertAIBlock, insertCodeBlock, insertEquation, insertVideoEmbed, openUploadPicker]);
 
 	const slashItems = useMemo(() => {
 		// Remove default "Media" group items so only our custom media upload items appear
@@ -780,14 +1096,102 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 	);
 
 	const { isDragging, handleDragOver, handleDragLeave, handleDrop } = useFileDrop({
-		onDropFiles: async (files) => {
+		onDropFiles: async (files, event) => {
+			const rootElement = editorRootRef.current;
+			const insertPosition = rootElement ? getDropInsertionPosition(rootElement, event.clientX, event.clientY) : null;
+
 			for (const file of files) {
 				const type = getMediaTypeFromFile(file);
 				if (!type) continue;
-				await uploadSingleFile(file, type);
+				await uploadSingleFile(file, type, insertPosition ?? undefined);
 			}
 		},
 	});
+
+	const clearBrowserTextSelection = useCallback(() => {
+		if (typeof window !== "undefined") {
+			window.getSelection()?.removeAllRanges();
+		}
+
+		const activeElement = document.activeElement;
+		if (activeElement instanceof HTMLElement && editorRootRef.current?.contains(activeElement)) {
+			activeElement.blur();
+		}
+	}, []);
+
+	const clearBlockSelection = useCallback(() => {
+		blockSelectionStartPointRef.current = null;
+		blockSelectionAnchorIdRef.current = null;
+		blockSelectionKeyRef.current = "";
+		clearBrowserTextSelection();
+		setSelectedBlockIds([]);
+	}, [clearBrowserTextSelection]);
+
+	useEffect(() => {
+		const rootElement = editorRootRef.current;
+		if (!rootElement || selectedBlockIds.length === 0) {
+			return;
+		}
+
+		const handlePointerDown = (event: PointerEvent) => {
+			const target = event.target;
+			if (!(target instanceof Node) || !rootElement.contains(target)) {
+				return;
+			}
+
+			clearBlockSelection();
+		};
+
+		rootElement.addEventListener("pointerdown", handlePointerDown, true);
+		return () => {
+			rootElement.removeEventListener("pointerdown", handlePointerDown, true);
+		};
+	}, [clearBlockSelection, selectedBlockIds.length]);
+
+	useEffect(() => {
+		const rootElement = editorRootRef.current;
+		if (!rootElement) {
+			return;
+		}
+
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if ((event.key !== "Delete" && event.key !== "Backspace") || isTextInputElement(event.target)) {
+				return;
+			}
+
+			const targetNode = event.target instanceof Node ? event.target : null;
+			const targetElement = targetNode instanceof Element ? targetNode : null;
+			const isEditorOrCanvasTarget =
+				!targetElement || targetElement === document.body || targetElement === document.documentElement || rootElement.contains(targetElement);
+
+			if (!isEditorOrCanvasTarget) {
+				return;
+			}
+
+			if (selectedBlockIds.length === 0) {
+				return;
+			}
+
+			const blocksToRemove = getTopLevelSelectedBlockIds(rootElement, selectedBlockIds).filter((id) => Boolean(editor.getBlock(id)));
+			if (blocksToRemove.length === 0) {
+				clearBlockSelection();
+				return;
+			}
+
+			event.preventDefault();
+			try {
+				editor.removeBlocks(blocksToRemove);
+			} catch (err) {
+				console.error("Failed to remove selected blocks", err);
+			}
+			clearBlockSelection();
+		};
+
+		document.addEventListener("keydown", handleKeyDown, true);
+		return () => {
+			document.removeEventListener("keydown", handleKeyDown, true);
+		};
+	}, [clearBlockSelection, editor, selectedBlockIds]);
 
 	const canRunHistoryCommand = (command: "undo" | "redo") => {
 		const tiptapEditor = editor._tiptapEditor as unknown as {
@@ -821,18 +1225,20 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 			return historyDepth > 0;
 		}
 
-		if (!tiptapEditor?.can) return true;
-		const canApi = tiptapEditor.can();
+		if (!tiptapEditor?.can) {
+			return true;
+		}
 
-		const direct = canApi?.[command];
-		if (typeof direct === "function") {
-			return Boolean(direct());
+		const canApi = tiptapEditor.can();
+		const directCommand = canApi?.[command];
+		if (typeof directCommand === "function") {
+			return Boolean(directCommand());
 		}
 
 		const chainApi = canApi?.chain?.();
-		const chained = chainApi?.[command];
-		if (typeof chained === "function") {
-			const chainResult = chained.call(chainApi);
+		const chainedCommand = chainApi?.[command];
+		if (typeof chainedCommand === "function") {
+			const chainResult = chainedCommand.call(chainApi);
 			if (typeof chainResult?.run === "function") {
 				return Boolean(chainResult.run());
 			}
@@ -841,19 +1247,174 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 			}
 		}
 
-		// If command availability cannot be determined reliably, keep controls enabled.
 		return true;
 	};
+
+	const applyBlockSelection = useCallback(
+		(blockIds: string[]) => {
+			const nextSelectionKey = blockIds.join(",");
+			if (blockSelectionKeyRef.current === nextSelectionKey) {
+				return;
+			}
+
+			blockSelectionKeyRef.current = nextSelectionKey;
+			clearBrowserTextSelection();
+			setSelectedBlockIds(blockIds);
+		},
+		[clearBrowserTextSelection],
+	);
+
+	useEffect(() => {
+		const rootElement = editorRootRef.current;
+		const handleSelectAll = (event: KeyboardEvent) => {
+			const isSelectAll = (event.key === "a" || event.key === "A") && (event.ctrlKey || event.metaKey);
+			if (!isSelectAll) return;
+
+			const targetNode = event.target instanceof Node ? event.target : null;
+			const targetElement = targetNode instanceof Element ? targetNode : null;
+			const isEditorOrCanvasTarget =
+				!targetElement ||
+				targetElement === document.body ||
+				targetElement === document.documentElement ||
+				(rootElement && rootElement.contains(targetElement));
+			if (!isEditorOrCanvasTarget) return;
+
+			if (!rootElement) return;
+
+			event.preventDefault();
+			const allBlockIds = getOrderedBlockIds(rootElement);
+			if (allBlockIds.length === 0) return;
+			applyBlockSelection(allBlockIds);
+		};
+
+		document.addEventListener("keydown", handleSelectAll, true);
+		return () => document.removeEventListener("keydown", handleSelectAll, true);
+	}, [applyBlockSelection]);
+
+	const beginBlockSelection = useCallback(
+		(clientX: number, clientY: number) => {
+			const rootElement = editorRootRef.current;
+			if (!rootElement) {
+				return;
+			}
+
+			clearBlockSelection();
+			blockSelectionStartPointRef.current = { x: clientX, y: clientY };
+
+			const initialSelection = getBlockIdsIntersectingRect(rootElement, new DOMRect(clientX, clientY, 0, 0));
+			blockSelectionAnchorIdRef.current = initialSelection[0] ?? null;
+			applyBlockSelection(initialSelection);
+		},
+		[applyBlockSelection, clearBlockSelection],
+	);
+
+	const updateBlockSelection = useCallback(
+		(clientX: number, clientY: number, source: "pointer" | "scroll" = "pointer") => {
+			const rootElement = editorRootRef.current;
+			if (!rootElement) {
+				return;
+			}
+
+			const startPoint = blockSelectionStartPointRef.current ?? { x: clientX, y: clientY };
+			if (!blockSelectionStartPointRef.current) {
+				blockSelectionStartPointRef.current = startPoint;
+			}
+
+			const selectionRect = getBlockSelectionRect(startPoint, { x: clientX, y: clientY });
+			const nextSelection = getBlockIdsIntersectingRect(rootElement, selectionRect);
+			if (nextSelection.length === 0) {
+				applyBlockSelection([]);
+				return;
+			}
+
+			if (!blockSelectionAnchorIdRef.current) {
+				blockSelectionAnchorIdRef.current = clientY >= startPoint.y ? (nextSelection[0] ?? null) : (nextSelection[nextSelection.length - 1] ?? null);
+			}
+
+			const anchorId = blockSelectionAnchorIdRef.current;
+			if (!anchorId) {
+				applyBlockSelection(nextSelection);
+				return;
+			}
+
+			const endpointId = clientY >= startPoint.y ? nextSelection[nextSelection.length - 1] : nextSelection[0];
+			if (!endpointId) {
+				applyBlockSelection(nextSelection);
+				return;
+			}
+
+			applyBlockSelection(getBlockSelectionRange(rootElement, anchorId, endpointId));
+		},
+		[applyBlockSelection],
+	);
+
+	const appendMarkdownToEnd = useCallback(
+		(markdown: string) => {
+			const trimmed = markdown.trim();
+			if (!trimmed) {
+				return false;
+			}
+
+			let newBlocks = parseRichTextToBlocks(editor, trimmed);
+			if (newBlocks.length === 0) {
+				newBlocks = [
+					{
+						type: "paragraph",
+						content: trimmed,
+					},
+				];
+			}
+
+			const anchorBlock = editor.document[editor.document.length - 1] ?? editor.getTextCursorPosition().block;
+			if (!anchorBlock) {
+				return false;
+			}
+
+			editor.insertBlocks(newBlocks as any, anchorBlock, "after");
+			return true;
+		},
+		[editor],
+	);
 
 	useImperativeHandle(ref, () => ({
 		undo: () => editor.undo(),
 		redo: () => editor.redo(),
 		canUndo: () => canRunHistoryCommand("undo"),
 		canRedo: () => canRunHistoryCommand("redo"),
+		appendMarkdownToEnd,
+		beginBlockSelection,
+		updateBlockSelection,
+		clearBlockSelection,
+		deleteSelectedBlocks: () => {
+			if (selectedBlockIds.length === 0) {
+				return false;
+			}
+
+			const rootElement = editorRootRef.current;
+			if (!rootElement) {
+				return false;
+			}
+
+			const blocksToRemove = getTopLevelSelectedBlockIds(rootElement, selectedBlockIds).filter((id) => Boolean(editor.getBlock(id)));
+			if (blocksToRemove.length === 0) {
+				clearBlockSelection();
+				return false;
+			}
+
+			editor.removeBlocks(blocksToRemove);
+			clearBlockSelection();
+			return true;
+		},
 	}));
 
 	return (
-		<div className="relative mx-auto w-full flex-1" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+		<div
+			ref={editorRootRef}
+			className="stacknote-editor-root relative mx-auto w-full flex-1"
+			data-has-block-selection={selectedBlockIds.length > 0 ? "true" : "false"}
+			onDragOver={handleDragOver}
+			onDragLeave={handleDragLeave}
+			onDrop={handleDrop}>
 			<input
 				ref={fileInputRef}
 				type="file"
@@ -875,13 +1436,40 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ noteId, 
 				}}
 			/>
 
-			<BlockNoteView editor={editor} theme="dark" slashMenu={false} data-theming-css-variables-demo>
+			<BlockNoteView editor={editor} theme="dark" slashMenu={false} formattingToolbar={false} data-theming-css-variables-demo>
+				<FormattingToolbarController formattingToolbar={CustomFormattingToolbar} />
 				<SuggestionMenuController
 					triggerCharacter="/"
 					getItems={async (query) => filterSuggestionItems(slashItems, query)}
 					floatingUIOptions={slashMenuFloatingUIOptions}
 				/>
 			</BlockNoteView>
+
+			{selectedBlockIds.map((blockId) => {
+				const blockElement = editorRootRef.current ? getBlockElementById(editorRootRef.current, blockId) : null;
+				if (!blockElement) {
+					return null;
+				}
+
+				const rootRect = editorRootRef.current?.getBoundingClientRect();
+				const blockRect = blockElement.getBoundingClientRect();
+				if (!rootRect) {
+					return null;
+				}
+
+				return (
+					<div
+						key={blockId}
+						className="pointer-events-none absolute z-10 rounded-[5px] border stacknote-selected-block"
+						style={{
+							left: blockRect.left - rootRect.left - 2,
+							top: blockRect.top - rootRect.top + 1,
+							width: blockRect.width + 4,
+							height: Math.max(0, blockRect.height - 2),
+						}}
+					/>
+				);
+			})}
 
 			{isDragging && (
 				<div

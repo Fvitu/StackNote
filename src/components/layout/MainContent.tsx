@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { format } from "date-fns";
-import { FileText, Plus, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History } from "lucide-react";
+import { FileText, Plus, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History, Sparkles } from "lucide-react";
 import { NoteEditor, type NoteEditorRef } from "@/components/editor/NoteEditor"
 import { NoteTitle } from "@/components/editor/NoteTitle"
 import { SaveIndicator } from "@/components/editor/SaveIndicator"
@@ -20,6 +20,7 @@ import {
 	type NoteVersionDetail,
 	type NoteVersionSummary,
 } from "@/lib/note-versioning";
+import { AISidePanel } from "@/components/ai/AISidePanel";
 
 const EMOJI_LIST = [
   // Smileys & Emotion
@@ -78,9 +79,37 @@ interface NoteData {
 
 type SaveStatus = "idle" | "saving" | "saved" | "error" | "offline" | "syncing" | "synced";
 
+type MarqueeSelection = {
+	startX: number;
+	startY: number;
+	currentX: number;
+	currentY: number;
+};
+
 const DEFAULT_EDITOR_WIDTH = 720;
 const MIN_EDITOR_WIDTH = 560;
 const MAX_EDITOR_WIDTH = 1200;
+const DEFAULT_AI_PANEL_WIDTH = 360;
+const MIN_AI_PANEL_WIDTH = 320;
+const MAX_AI_PANEL_WIDTH = 760;
+
+function getRectFromMarquee(selection: MarqueeSelection): DOMRect {
+	const left = Math.min(selection.startX, selection.currentX);
+	const right = Math.max(selection.startX, selection.currentX);
+	const top = Math.min(selection.startY, selection.currentY);
+	const bottom = Math.max(selection.startY, selection.currentY);
+
+	return new DOMRect(left, top, right - left, bottom - top);
+}
+
+function shouldStartCanvasMarquee(event: ReactPointerEvent<HTMLDivElement>): boolean {
+	if (event.button !== 0) {
+		return false;
+	}
+
+	const target = event.target;
+	return target instanceof HTMLElement && target === event.currentTarget;
+}
 
 function getStoredNoteWidth(noteId: string): number | null {
 	if (typeof window === "undefined") return null;
@@ -94,6 +123,24 @@ function getStoredNoteWidth(noteId: string): number | null {
 function setStoredNoteWidth(noteId: string, width: number) {
 	if (typeof window === "undefined") return;
 	window.localStorage.setItem(`note-width:${noteId}`, String(Math.round(width)));
+}
+
+function getStoredAiPanelWidth(): number | null {
+	if (typeof window === "undefined") return null;
+	const raw = window.localStorage.getItem("ai-panel-width");
+	if (!raw) return null;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed)) return null;
+	return Math.max(MIN_AI_PANEL_WIDTH, Math.min(MAX_AI_PANEL_WIDTH, parsed));
+}
+
+function setStoredAiPanelWidth(width: number) {
+	if (typeof window === "undefined") return;
+	window.localStorage.setItem("ai-panel-width", String(Math.round(width)));
+}
+
+function isTextEntryElement(target: EventTarget | null): boolean {
+	return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select"));
 }
 
 function buildCachedMetadata(note: NoteData): CachedNoteMetadata {
@@ -136,6 +183,10 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 	const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
 	const [editorWidth, setEditorWidth] = useState(DEFAULT_EDITOR_WIDTH);
 	const [isResizing, setIsResizing] = useState(false);
+	const editorShellRef = useRef<HTMLDivElement | null>(null);
+	const mainScrollRef = useRef<HTMLDivElement | null>(null);
+	const marqueeSelectionRef = useRef<MarqueeSelection | null>(null);
+	const editorWidthDraftRef = useRef(DEFAULT_EDITOR_WIDTH);
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const emojiWrapperRef = useRef<HTMLDivElement>(null);
 	const editorRef = useRef<NoteEditorRef>(null);
@@ -160,6 +211,41 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 	const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
 	const [isCreatingManualVersion, setIsCreatingManualVersion] = useState(false);
 	const [editorResetToken, setEditorResetToken] = useState(0);
+	const [isAIPanelOpen, setIsAIPanelOpen] = useState(false);
+	const [isAiPanelMounted, setIsAiPanelMounted] = useState(false);
+	const [aiPanelWidth, setAiPanelWidth] = useState(() => getStoredAiPanelWidth() ?? DEFAULT_AI_PANEL_WIDTH);
+	const [isAiPanelResizing, setIsAiPanelResizing] = useState(false);
+	const [marqueeSelection, setMarqueeSelection] = useState<MarqueeSelection | null>(null);
+	const [isMarqueeActive, setIsMarqueeActive] = useState(false);
+	const aiPanelRef = useRef<HTMLDivElement | null>(null);
+	const aiPanelWidthDraftRef = useRef(getStoredAiPanelWidth() ?? DEFAULT_AI_PANEL_WIDTH);
+	const aiPanelResizeStartXRef = useRef(0);
+	const aiPanelResizeStartWidthRef = useRef(DEFAULT_AI_PANEL_WIDTH);
+	const aiPanelAnimationFrameRef = useRef<number | null>(null);
+	const aiPanelOpenFrameRef = useRef<number | null>(null);
+	const aiPanelCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const marqueeSelectionFrameRef = useRef<number | null>(null);
+	const marqueeAutoScrollFrameRef = useRef<number | null>(null);
+	const marqueeSelectionKeyRef = useRef("");
+	const marqueePointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+
+	const applyEditorWidth = useCallback((width: number) => {
+		editorWidthDraftRef.current = width;
+		if (editorShellRef.current) {
+			editorShellRef.current.style.width = `${width}px`;
+		}
+	}, []);
+
+	const applyAiPanelWidth = useCallback((width: number) => {
+		aiPanelWidthDraftRef.current = width;
+		if (aiPanelRef.current) {
+			if (typeof window !== "undefined" && window.innerWidth < 768) {
+				aiPanelRef.current.style.width = "100%";
+				return;
+			}
+			aiPanelRef.current.style.width = `${width}px`;
+		}
+	}, []);
 
 	const setCurrentNoteState = useCallback((nextNote: NoteData | null) => {
 		noteRef.current = nextNote;
@@ -198,11 +284,12 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 					? Math.max(MIN_EDITOR_WIDTH, Math.min(MAX_EDITOR_WIDTH, Math.floor((window.innerWidth - 96) * 0.95)))
 					: DEFAULT_EDITOR_WIDTH;
 
-			setEditorWidth(
-				persistedWidth ?? (widthFromServer !== null ? Math.max(MIN_EDITOR_WIDTH, Math.min(MAX_EDITOR_WIDTH, widthFromServer)) : viewportMax),
-			);
+			const nextWidth =
+				persistedWidth ?? (widthFromServer !== null ? Math.max(MIN_EDITOR_WIDTH, Math.min(MAX_EDITOR_WIDTH, widthFromServer)) : viewportMax);
+			setEditorWidth(nextWidth);
+			applyEditorWidth(nextWidth);
 		},
-		[setCurrentNoteState],
+		[applyEditorWidth, setCurrentNoteState],
 	);
 
 	const cacheNoteSnapshot = useCallback(
@@ -846,67 +933,6 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 				}
 
 				const version = (await response.json()) as NoteVersionDetail;
-				const restoredTitle = typeof version.title === "string" && version.title.trim().length > 0 ? version.title : current.title;
-				const restoredEmoji = typeof version.emoji === "string" || version.emoji === null ? version.emoji : (current.emoji ?? null);
-
-				const noteMetaResponse = await fetch(`/api/notes/${current.id}`, {
-					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						title: restoredTitle,
-						emoji: restoredEmoji,
-					}),
-				});
-
-				if (!noteMetaResponse.ok) {
-					throw new Error("Failed to restore note title or emoji");
-				}
-
-				const noteMetaData = (await noteMetaResponse.json()) as { updatedAt: string };
-				const noteWithRestoredMeta = updateCurrentNoteState((existing) => ({
-					...existing,
-					title: restoredTitle,
-					emoji: restoredEmoji,
-					updatedAt: noteMetaData.updatedAt ?? existing.updatedAt,
-				}));
-				if (noteWithRestoredMeta) {
-					cacheNoteSnapshot(noteWithRestoredMeta);
-				}
-
-				const nextCoverImage = version.coverImage ?? null;
-				const nextCoverMeta =
-					nextCoverImage === null
-						? null
-						: (resolveNoteCoverMeta(nextCoverImage, version.coverImageMeta) ?? resolveNoteCoverMeta(nextCoverImage, current.coverImageMeta));
-
-				const coverResponse = await fetch(`/api/notes/${current.id}/cover`, {
-					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						coverImage: nextCoverImage,
-						coverImageMeta: nextCoverMeta,
-					}),
-				});
-
-				if (!coverResponse.ok) {
-					throw new Error("Failed to restore cover");
-				}
-
-				const coverData = (await coverResponse.json()) as {
-					coverImage: string | null;
-					coverImageMeta: unknown;
-					updatedAt: string;
-				};
-				const noteWithRestoredCover = updateCurrentNoteState((existing) => ({
-					...existing,
-					coverImage: coverData.coverImage,
-					coverImageMeta: coverData.coverImageMeta,
-					updatedAt: coverData.updatedAt ?? existing.updatedAt,
-				}));
-				if (noteWithRestoredCover) {
-					cacheNoteSnapshot(noteWithRestoredCover);
-				}
-
 				const result = await createVersion({
 					manual: true,
 					label: `Restored from ${format(new Date(version.createdAt), "PPP 'at' p")}`,
@@ -918,13 +944,7 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 					return;
 				}
 
-				setPreviewVersion({
-					...version,
-					title: restoredTitle,
-					emoji: restoredEmoji,
-					coverImage: coverData.coverImage,
-					coverImageMeta: coverData.coverImageMeta,
-				});
+				setPreviewVersion(version);
 				setPreviewVersionId(version.id);
 				setEditorResetToken((token) => token + 1);
 				markSaveSuccess();
@@ -937,7 +957,7 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 				setRestoringVersionId(null);
 			}
 		},
-		[cacheNoteSnapshot, createVersion, fetchVersions, markSaveFailure, markSaveSuccess, onRefresh, updateCurrentNoteState],
+		[createVersion, fetchVersions, markSaveFailure, markSaveSuccess, onRefresh],
 	);
 
 	const handleCoverUpdated = useCallback(
@@ -1075,18 +1095,70 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 		return () => clearInterval(interval);
 	}, [state.activeNoteId, note?.id]);
 
-	const persistCurrentWidth = useCallback(async () => {
-		if (!state.activeNoteId) return;
-		const width = Math.round(editorWidth);
-		setStoredNoteWidth(state.activeNoteId, width);
-		const nextNote = updateCurrentNoteState((current) => ({
-			...current,
-			editorWidth: width,
-		}));
-		if (nextNote) {
-			cacheNoteSnapshot(nextNote);
+	const persistCurrentWidth = useCallback(
+		async (nextWidth?: number) => {
+			if (!state.activeNoteId) return;
+			const width = Math.round(nextWidth ?? editorWidthDraftRef.current);
+			setStoredNoteWidth(state.activeNoteId, width);
+			const nextNote = updateCurrentNoteState((current) => ({
+				...current,
+				editorWidth: width,
+			}));
+			if (nextNote) {
+				cacheNoteSnapshot(nextNote);
+			}
+		},
+		[cacheNoteSnapshot, state.activeNoteId, updateCurrentNoteState],
+	);
+
+	useEffect(() => {
+		if (!isResizing) {
+			applyEditorWidth(editorWidth);
 		}
-	}, [cacheNoteSnapshot, editorWidth, state.activeNoteId, updateCurrentNoteState]);
+	}, [applyEditorWidth, editorWidth, isResizing]);
+
+	useEffect(() => {
+		if (!isAiPanelResizing) {
+			applyAiPanelWidth(aiPanelWidth);
+		}
+	}, [aiPanelWidth, applyAiPanelWidth, isAiPanelResizing]);
+
+	useEffect(() => {
+		if (aiPanelCloseTimeoutRef.current !== null) {
+			clearTimeout(aiPanelCloseTimeoutRef.current);
+			aiPanelCloseTimeoutRef.current = null;
+		}
+
+		if (aiPanelOpenFrameRef.current !== null) {
+			cancelAnimationFrame(aiPanelOpenFrameRef.current);
+			aiPanelOpenFrameRef.current = null;
+		}
+
+		if (isAIPanelOpen) {
+			setIsAiPanelMounted(true);
+			aiPanelOpenFrameRef.current = window.requestAnimationFrame(() => {
+				aiPanelOpenFrameRef.current = null;
+			});
+			return () => {
+				if (aiPanelOpenFrameRef.current !== null) {
+					cancelAnimationFrame(aiPanelOpenFrameRef.current);
+					aiPanelOpenFrameRef.current = null;
+				}
+			};
+		}
+
+		aiPanelCloseTimeoutRef.current = setTimeout(() => {
+			setIsAiPanelMounted(false);
+			aiPanelCloseTimeoutRef.current = null;
+		}, 220);
+
+		return () => {
+			if (aiPanelCloseTimeoutRef.current !== null) {
+				clearTimeout(aiPanelCloseTimeoutRef.current);
+				aiPanelCloseTimeoutRef.current = null;
+			}
+		};
+	}, [isAIPanelOpen]);
 
 	useEffect(() => {
 		if (!isResizing) return;
@@ -1101,13 +1173,15 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 				cancelAnimationFrame(animationFrameRef.current);
 			}
 			animationFrameRef.current = window.requestAnimationFrame(() => {
-				setEditorWidth(nextWidth);
+				applyEditorWidth(nextWidth);
 			});
 		};
 
 		const onMouseUp = () => {
+			const committedWidth = editorWidthDraftRef.current;
 			setIsResizing(false);
-			void persistCurrentWidth();
+			setEditorWidth(committedWidth);
+			void persistCurrentWidth(committedWidth);
 		};
 
 		window.addEventListener("mousemove", onMouseMove);
@@ -1120,14 +1194,245 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 				cancelAnimationFrame(animationFrameRef.current);
 			}
 		};
-	}, [isResizing, persistCurrentWidth]);
+	}, [applyEditorWidth, isResizing, persistCurrentWidth]);
+
+	useEffect(() => {
+		if (!isAiPanelResizing) {
+			return;
+		}
+
+		const maxAllowedByViewport = Math.max(MIN_AI_PANEL_WIDTH, Math.min(MAX_AI_PANEL_WIDTH, Math.floor(window.innerWidth * 0.6)));
+
+		const onMouseMove = (event: MouseEvent) => {
+			const dx = event.clientX - aiPanelResizeStartXRef.current;
+			const nextWidth = Math.max(MIN_AI_PANEL_WIDTH, Math.min(maxAllowedByViewport, aiPanelResizeStartWidthRef.current - dx));
+
+			if (aiPanelAnimationFrameRef.current !== null) {
+				cancelAnimationFrame(aiPanelAnimationFrameRef.current);
+			}
+
+			aiPanelAnimationFrameRef.current = window.requestAnimationFrame(() => {
+				applyAiPanelWidth(nextWidth);
+			});
+		};
+
+		const onMouseUp = () => {
+			const committedWidth = aiPanelWidthDraftRef.current;
+			setAiPanelWidth(committedWidth);
+			setIsAiPanelResizing(false);
+			setStoredAiPanelWidth(committedWidth);
+		};
+
+		window.addEventListener("mousemove", onMouseMove);
+		window.addEventListener("mouseup", onMouseUp);
+
+		return () => {
+			window.removeEventListener("mousemove", onMouseMove);
+			window.removeEventListener("mouseup", onMouseUp);
+			if (aiPanelAnimationFrameRef.current !== null) {
+				cancelAnimationFrame(aiPanelAnimationFrameRef.current);
+			}
+		};
+	}, [applyAiPanelWidth, isAiPanelResizing]);
 
 	const startResize = (event: React.MouseEvent<HTMLDivElement>) => {
 		event.preventDefault();
 		resizeStartXRef.current = event.clientX;
-		resizeStartWidthRef.current = editorWidth;
+		resizeStartWidthRef.current = editorWidthDraftRef.current;
 		setIsResizing(true);
 	};
+
+	const startAiPanelResize = (event: React.MouseEvent<HTMLDivElement>) => {
+		event.preventDefault();
+		aiPanelResizeStartXRef.current = event.clientX;
+		aiPanelResizeStartWidthRef.current = aiPanelWidthDraftRef.current;
+		setIsAiPanelResizing(true);
+	};
+
+	const handleAppendAiContent = useCallback((markdown: string) => {
+		return editorRef.current?.appendMarkdownToEnd(markdown) ?? false;
+	}, []);
+
+	useEffect(() => {
+		const handleGlobalUndoRedo = (event: KeyboardEvent) => {
+			if (!(event.ctrlKey || event.metaKey) || event.altKey || event.isComposing) {
+				return;
+			}
+
+			const key = event.key.toLowerCase();
+			const isUndoShortcut = key === "z" && !event.shiftKey;
+			const isRedoShortcut = (key === "z" && event.shiftKey) || key === "y";
+			if (!isUndoShortcut && !isRedoShortcut) {
+				return;
+			}
+
+			if (isTextEntryElement(event.target)) {
+				return;
+			}
+
+			const editor = editorRef.current;
+			if (!editor) {
+				return;
+			}
+
+			if (isUndoShortcut && !editor.canUndo()) {
+				return;
+			}
+
+			if (isRedoShortcut && !editor.canRedo()) {
+				return;
+			}
+
+			event.preventDefault();
+			event.stopImmediatePropagation();
+
+			if (isUndoShortcut) {
+				editor.undo();
+				return;
+			}
+
+			editor.redo();
+		};
+
+		window.addEventListener("keydown", handleGlobalUndoRedo, true);
+		return () => {
+			window.removeEventListener("keydown", handleGlobalUndoRedo, true);
+		};
+	}, []);
+
+	const handleCanvasPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+		if (!shouldStartCanvasMarquee(event)) {
+			return;
+		}
+
+		event.preventDefault();
+		marqueeSelectionKeyRef.current = "";
+		marqueePointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+		editorRef.current?.beginBlockSelection(event.clientX, event.clientY);
+		const initial = {
+			startX: event.clientX,
+			startY: event.clientY,
+			currentX: event.clientX,
+			currentY: event.clientY,
+		};
+		marqueeSelectionRef.current = initial;
+		setMarqueeSelection(initial);
+		setIsMarqueeActive(true);
+	}, []);
+
+	useEffect(() => {
+		if (!isMarqueeActive) {
+			return;
+		}
+
+		const edgeThreshold = 72;
+		const maxScrollStep = 28;
+
+		const commitSelection = (selection: MarqueeSelection) => {
+			marqueeSelectionRef.current = selection;
+			const nextSelectionKey = `${selection.startX}:${selection.startY}:${selection.currentX}:${selection.currentY}`;
+			if (marqueeSelectionKeyRef.current !== nextSelectionKey) {
+				marqueeSelectionKeyRef.current = nextSelectionKey;
+				setMarqueeSelection(selection);
+			}
+			editorRef.current?.updateBlockSelection(selection.currentX, selection.currentY);
+		};
+
+		const scheduleSelectionCommit = (selection: MarqueeSelection) => {
+			if (marqueeSelectionFrameRef.current !== null) {
+				cancelAnimationFrame(marqueeSelectionFrameRef.current);
+			}
+
+			marqueeSelectionFrameRef.current = window.requestAnimationFrame(() => {
+				marqueeSelectionFrameRef.current = null;
+				commitSelection(selection);
+			});
+		};
+
+		const handlePointerMove = (event: PointerEvent) => {
+			marqueePointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+			const current = marqueeSelectionRef.current;
+			if (!current) return;
+
+			scheduleSelectionCommit({
+				...current,
+				currentX: event.clientX,
+				currentY: event.clientY,
+			});
+		};
+
+		const handlePointerEnd = () => {
+			marqueeSelectionRef.current = null;
+			marqueePointerRef.current = null;
+			marqueeSelectionKeyRef.current = "";
+			if (marqueeSelectionFrameRef.current !== null) {
+				cancelAnimationFrame(marqueeSelectionFrameRef.current);
+				marqueeSelectionFrameRef.current = null;
+			}
+			if (marqueeAutoScrollFrameRef.current !== null) {
+				cancelAnimationFrame(marqueeAutoScrollFrameRef.current);
+				marqueeAutoScrollFrameRef.current = null;
+			}
+			setMarqueeSelection(null);
+			setIsMarqueeActive(false);
+		};
+
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerEnd, { once: true });
+		window.addEventListener("pointercancel", handlePointerEnd, { once: true });
+
+		const handleScroll = () => {
+			const sel = marqueeSelectionRef.current;
+			if (sel) {
+				editorRef.current?.updateBlockSelection(sel.currentX, sel.currentY, "scroll");
+			}
+		};
+
+		const autoScrollSelection = () => {
+			const selection = marqueeSelectionRef.current;
+			const pointer = marqueePointerRef.current;
+			const scrollContainer = mainScrollRef.current;
+
+			if (selection && pointer && scrollContainer) {
+				const containerRect = scrollContainer.getBoundingClientRect();
+				let scrollDelta = 0;
+
+				if (pointer.clientY < containerRect.top + edgeThreshold) {
+					const distance = Math.max(0, containerRect.top + edgeThreshold - pointer.clientY);
+					scrollDelta = -Math.max(4, Math.round((distance / edgeThreshold) * maxScrollStep));
+				} else if (pointer.clientY > containerRect.bottom - edgeThreshold) {
+					const distance = Math.max(0, pointer.clientY - (containerRect.bottom - edgeThreshold));
+					scrollDelta = Math.max(4, Math.round((distance / edgeThreshold) * maxScrollStep));
+				}
+
+				if (scrollDelta !== 0) {
+					scrollContainer.scrollBy({ top: scrollDelta, behavior: "auto" });
+					editorRef.current?.updateBlockSelection(pointer.clientX, pointer.clientY, "scroll");
+				}
+			}
+
+			marqueeAutoScrollFrameRef.current = window.requestAnimationFrame(autoScrollSelection);
+		};
+
+		const scrollContainer = mainScrollRef.current;
+		scrollContainer?.addEventListener("scroll", handleScroll, { passive: true });
+		marqueeAutoScrollFrameRef.current = window.requestAnimationFrame(autoScrollSelection);
+
+		return () => {
+			if (marqueeSelectionFrameRef.current !== null) {
+				cancelAnimationFrame(marqueeSelectionFrameRef.current);
+				marqueeSelectionFrameRef.current = null;
+			}
+			if (marqueeAutoScrollFrameRef.current !== null) {
+				cancelAnimationFrame(marqueeAutoScrollFrameRef.current);
+				marqueeAutoScrollFrameRef.current = null;
+			}
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerEnd);
+			window.removeEventListener("pointercancel", handlePointerEnd);
+			scrollContainer?.removeEventListener("scroll", handleScroll);
+		};
+	}, [isMarqueeActive]);
 
 	if (loading) {
 		return (
@@ -1179,193 +1484,279 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 		);
 	}
 
+	const marqueeRect = marqueeSelection ? getRectFromMarquee(marqueeSelection) : null;
+
 	return (
-		<div className="flex flex-1 flex-col overflow-y-auto fade-in" style={{ backgroundColor: "var(--bg-app)" }}>
-			{/* Note header bar */}
-			<div className="flex h-9 shrink-0 items-center justify-between px-4" style={{ borderBottom: "1px solid var(--border-default)" }}>
-				<div className="flex items-center gap-2">
-					{!isSidebarOpen && (
-						<button
-							onClick={onToggleSidebar}
-							className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
-							title="Open sidebar (Ctrl+\)">
-							<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-						</button>
-					)}
-					<div className="flex items-center gap-1 text-xs" style={{ color: "var(--text-tertiary)" }}>
-						<span>{workspaceName}</span>
-						{note.folder && (
-							<>
-								<span>/</span>
-								<span>{note.folder.name}</span>
-							</>
+		<div
+			className="flex flex-1 overflow-hidden fade-in"
+			style={{
+				backgroundColor: "var(--bg-app)",
+				transform: "none",
+				transition: "none",
+				willChange: "auto",
+			}}>
+			{/* Main editor area */}
+			<div ref={mainScrollRef} className="flex flex-1 flex-col overflow-y-auto" style={{}}>
+				{/* Note header bar */}
+				<div className="flex h-9 shrink-0 items-center justify-between px-4" style={{ borderBottom: "1px solid var(--border-default)" }}>
+					<div className="flex items-center gap-2">
+						{!isSidebarOpen && (
+							<button
+								onClick={onToggleSidebar}
+								className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
+								title="Open sidebar (Ctrl+\)">
+								<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
+							</button>
 						)}
-						<span>/</span>
-						<span style={{ color: "var(--text-secondary)" }}>{note.title || "Untitled"}</span>
-					</div>
-				</div>
-				<div className="flex items-center gap-2">
-					<SaveIndicator status={saveStatus} />
-					<button
-						onClick={openVersionsDialog}
-						className="flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 hover:bg-[#1a1a1a]"
-						title="View note history">
-						<History className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-						<span style={{ color: "var(--text-tertiary)" }}>History</span>
-					</button>
-					<button
-						onClick={() => editorRef.current?.undo()}
-						disabled={!canUndo}
-						className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30"
-						title="Undo (Ctrl+Z)">
-						<Undo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-					</button>
-					<button
-						onClick={() => editorRef.current?.redo()}
-						disabled={!canRedo}
-						className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30"
-						title="Redo (Ctrl+Y)">
-						<Redo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-					</button>
-					<NoteActionsMenu
-						type="note"
-						align="end"
-						onChangeIcon={() => setEmojiPickerOpen(true)}
-						onDuplicate={handleDuplicate}
-						onSaveVersion={() => void handleManualVersion()}
-						saveVersionDisabled={isCreatingManualVersion || !isOnline}
-						saveVersionLabel={isCreatingManualVersion ? "Saving..." : "Save version"}
-						onDelete={handleDelete}
-					/>
-				</div>
-			</div>
-
-			{/* Note content */}
-			<div className="mx-auto w-full flex-1 px-6 py-8" style={{ maxWidth: "100%" }}>
-				<NoteCoverPanel noteId={note.id} coverImage={note.coverImage} coverImageMeta={note.coverImageMeta} onCoverUpdated={handleCoverUpdated} />
-
-				{/* Emoji icon & title row */}
-				<div className="mb-2 flex items-start gap-3">
-					{/* Emoji selector button */}
-					<div ref={emojiWrapperRef} className="relative mt-1 shrink-0">
-						<button
-							onClick={() => setEmojiPickerOpen((v) => !v)}
-							className="flex h-10 w-10 items-center justify-center rounded-[var(--sn-radius-md)] text-xl transition-colors duration-150 hover:bg-[#1a1a1a]"
-							title="Change icon">
-							{note.emoji ? <span>{note.emoji}</span> : <FileText className="h-5 w-5" style={{ color: "var(--text-tertiary)" }} />}
-						</button>
-
-						{/* Emoji picker popup */}
-						{emojiPickerOpen && (
-							<div
-								className="absolute left-0 top-12 z-50 w-64 rounded-[var(--sn-radius-lg)] dropdown-enter"
+						<div className="flex items-center gap-1 text-xs min-w-0" style={{ color: "var(--text-tertiary)" }}>
+							<span
+								className="min-w-0"
 								style={{
-									backgroundColor: "var(--bg-hover)",
-									border: "1px solid var(--border-strong)",
-									boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-									maxHeight: "320px",
-									display: "flex",
-									flexDirection: "column",
+									overflow: "hidden",
+									textOverflow: "ellipsis",
+									whiteSpace: "nowrap",
+									display: "inline-block",
+									maxWidth: "calc(100vw - 280px)",
 								}}>
-								<div
-									className="overflow-y-auto p-2"
-									style={{
-										scrollbarWidth: "thin",
-									}}>
-									<div className="grid grid-cols-8 gap-0.5">
-										{EMOJI_LIST.map((em, index) => (
-											<button
-												key={`${em}-${index}`}
-												onClick={() => handleEmojiChange(em)}
-												className="flex h-7 w-7 items-center justify-center rounded text-base transition-colors duration-100 hover:bg-[#1f1f1f]"
-												title={em}>
-												{em}
-											</button>
-										))}
-									</div>
-								</div>
-								{note.emoji && (
-									<div className="border-t px-2 py-1" style={{ borderColor: "var(--border-strong)" }}>
-										<button
-											onClick={() => handleEmojiChange(null)}
-											className="w-full rounded py-1 text-xs transition-colors duration-100 hover:bg-[#1f1f1f]"
-											style={{ color: "var(--text-tertiary)" }}>
-											Remove icon
-										</button>
-									</div>
-								)}
-							</div>
-						)}
+								{workspaceName}
+								{note.folder && <> / {note.folder.name}</>}
+								<> / </>
+								<span style={{ color: "var(--text-secondary)" }}>{note.title || "Untitled"}</span>
+							</span>
+						</div>
 					</div>
+					<div className="flex items-center gap-2">
+						<SaveIndicator status={saveStatus} />
+						<button
+							onClick={openVersionsDialog}
+							className="flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 hover:bg-[#1a1a1a]"
+							title="View note history">
+							<History className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+							<span style={{ color: "var(--text-tertiary)" }}>History</span>
+						</button>
+						<button
+							onClick={() => editorRef.current?.undo()}
+							disabled={!canUndo}
+							className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30"
+							title="Undo (Ctrl+Z)">
+							<Undo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+						</button>
+						<button
+							onClick={() => editorRef.current?.redo()}
+							disabled={!canRedo}
+							className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30"
+							title="Redo (Ctrl+Y)">
+							<Redo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+						</button>
+						<button
+							onClick={() => setIsAIPanelOpen((v) => !v)}
+							className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${isAIPanelOpen ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
+							title="AI Assistant">
+							<Sparkles className="h-3.5 w-3.5" style={{ color: isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)" }} />
+							<span style={{ color: isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)" }}>AI</span>
+						</button>
+						<NoteActionsMenu
+							type="note"
+							align="end"
+							onChangeIcon={() => setEmojiPickerOpen(true)}
+							onDuplicate={handleDuplicate}
+							onSaveVersion={() => void handleManualVersion()}
+							saveVersionDisabled={isCreatingManualVersion || !isOnline}
+							saveVersionLabel={isCreatingManualVersion ? "Saving..." : "Save version"}
+							onDelete={handleDelete}
+						/>
+					</div>
+				</div>
 
-					<div className="flex-1 min-w-0">
-						<NoteTitle initialTitle={note.title} onSave={handleSaveTitle} autoFocus={isNewNote} />
-						<div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-							<div className="flex items-center gap-1">
-								<CalendarClock className="h-3 w-3" />
-								<span>Created {new Date(note.createdAt).toLocaleString()}</span>
-							</div>
-							<div className="flex items-center gap-1">
-								<Clock3 className="h-3 w-3" />
-								<span>Last edited {new Date(note.updatedAt).toLocaleString()}</span>
+				{/* Note content */}
+				<div
+					className="mx-auto w-full flex-1 px-6 py-8"
+					style={{ maxWidth: "100%", userSelect: marqueeSelection ? "none" : undefined }}
+					onPointerDown={handleCanvasPointerDown}>
+					<NoteCoverPanel noteId={note.id} coverImage={note.coverImage} coverImageMeta={note.coverImageMeta} onCoverUpdated={handleCoverUpdated} />
+
+					{/* Emoji icon & title row */}
+					<div className="mb-2 flex items-start gap-3">
+						{/* Emoji selector button */}
+						<div ref={emojiWrapperRef} className="relative mt-1 shrink-0">
+							<button
+								onClick={() => setEmojiPickerOpen((v) => !v)}
+								className="flex h-10 w-10 items-center justify-center rounded-[var(--sn-radius-md)] text-xl transition-colors duration-150 hover:bg-[#1a1a1a]"
+								title="Change icon">
+								{note.emoji ? <span>{note.emoji}</span> : <FileText className="h-5 w-5" style={{ color: "var(--text-tertiary)" }} />}
+							</button>
+
+							{/* Emoji picker popup */}
+							{emojiPickerOpen && (
+								<div
+									className="absolute left-0 top-12 z-50 w-64 rounded-[var(--sn-radius-lg)] dropdown-enter"
+									style={{
+										backgroundColor: "var(--bg-hover)",
+										border: "1px solid var(--border-strong)",
+										boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+										maxHeight: "320px",
+										display: "flex",
+										flexDirection: "column",
+									}}>
+									<div
+										className="overflow-y-auto p-2"
+										style={{
+											scrollbarWidth: "thin",
+										}}>
+										<div className="grid grid-cols-8 gap-0.5">
+											{EMOJI_LIST.map((em, index) => (
+												<button
+													key={`${em}-${index}`}
+													onClick={() => handleEmojiChange(em)}
+													className="flex h-7 w-7 items-center justify-center rounded text-base transition-colors duration-100 hover:bg-[#1f1f1f]"
+													title={em}>
+													{em}
+												</button>
+											))}
+										</div>
+									</div>
+									{note.emoji && (
+										<div className="border-t px-2 py-1" style={{ borderColor: "var(--border-strong)" }}>
+											<button
+												onClick={() => handleEmojiChange(null)}
+												className="w-full rounded py-1 text-xs transition-colors duration-100 hover:bg-[#1f1f1f]"
+												style={{ color: "var(--text-tertiary)" }}>
+												Remove icon
+											</button>
+										</div>
+									)}
+								</div>
+							)}
+						</div>
+
+						<div className="min-w-0 flex-1">
+							<NoteTitle initialTitle={note.title} onSave={handleSaveTitle} autoFocus={isNewNote} />
+							<div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+								<div className="flex items-center gap-1">
+									<CalendarClock className="h-3 w-3" />
+									<span>Created {new Date(note.createdAt).toLocaleString()}</span>
+								</div>
+								<div className="flex items-center gap-1">
+									<Clock3 className="h-3 w-3" />
+									<span>Last edited {new Date(note.updatedAt).toLocaleString()}</span>
+								</div>
 							</div>
 						</div>
 					</div>
+
+					<div
+						ref={editorShellRef}
+						className="group relative mt-2 mx-auto stacknote-editor-shell"
+						style={{ width: `${editorWidth}px`, maxWidth: "100%" }}>
+						<NoteEditor
+							key={`${note.id}:${editorResetToken}`}
+							ref={editorRef}
+							workspaceId={workspaceId}
+							noteId={note.id}
+							initialContent={note.content}
+							onContentChange={handleContentChange}
+							onSave={handleSaveContent}
+						/>
+						<div
+							onMouseDown={startResize}
+							className="absolute bottom-0 right-[-3px] top-0 z-20 w-3 cursor-ew-resize rounded duration-150"
+							style={{
+								backgroundColor: isResizing ? "rgba(124, 106, 255, 0.2)" : "transparent",
+								opacity: isResizing ? 1 : undefined,
+							}}
+							onMouseEnter={(e) => {
+								if (!isResizing) {
+									(e.currentTarget as HTMLElement).style.backgroundColor = "rgba(124, 106, 255, 0.16)";
+								}
+							}}
+							onMouseLeave={(e) => {
+								if (!isResizing) {
+									(e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+								}
+							}}
+						/>
+					</div>
 				</div>
 
-				<div className="group relative mt-2 mx-auto" style={{ width: `${editorWidth}px`, maxWidth: "100%" }}>
-					<NoteEditor
-						key={`${note.id}:${editorResetToken}`}
-						ref={editorRef}
-						noteId={note.id}
-						initialContent={note.content}
-						onContentChange={handleContentChange}
-						onSave={handleSaveContent}
-					/>
-					<div
-						onMouseDown={startResize}
-						className="absolute bottom-0 right-[-6px] top-0 z-20 w-3 cursor-ew-resize rounded transition-colors duration-150"
-						style={{
-							backgroundColor: isResizing ? "rgba(124, 106, 255, 0.2)" : "transparent",
-							opacity: isResizing ? 1 : undefined,
-						}}
-						onMouseEnter={(e) => {
-							if (!isResizing) {
-								(e.currentTarget as HTMLElement).style.backgroundColor = "rgba(124, 106, 255, 0.16)";
-							}
-						}}
-						onMouseLeave={(e) => {
-							if (!isResizing) {
-								(e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
-							}
-						}}
-					/>
-				</div>
+				<NoteVersionsDialog
+					open={versionsOpen}
+					currentContent={currentContentRef.current ?? note.content}
+					currentTitle={note.title}
+					currentEmoji={note.emoji ?? null}
+					currentCoverImage={note.coverImage}
+					currentCoverImageMeta={note.coverImageMeta}
+					currentVersionId={null}
+					versions={versions}
+					loading={versionsLoading}
+					previewVersionId={previewVersionId}
+					previewVersion={previewVersion}
+					previewLoading={previewLoading}
+					restoringVersionId={restoringVersionId}
+					onClose={() => setVersionsOpen(false)}
+					onRefresh={() => {
+						if (note.id) {
+							void fetchVersions(note.id);
+						}
+					}}
+					onPreview={handlePreviewVersion}
+					onRestore={handleRestoreVersion}
+				/>
 			</div>
 
-			<NoteVersionsDialog
-				open={versionsOpen}
-				currentContent={currentContentRef.current ?? note.content}
-				currentTitle={note.title}
-				currentEmoji={note.emoji ?? null}
-				currentCoverImage={note.coverImage}
-				currentCoverImageMeta={note.coverImageMeta}
-				currentVersionId={versions[0]?.id ?? null}
-				versions={versions}
-				loading={versionsLoading}
-				previewVersionId={previewVersionId}
-				previewVersion={previewVersion}
-				previewLoading={previewLoading}
-				restoringVersionId={restoringVersionId}
-				onClose={() => setVersionsOpen(false)}
-				onRefresh={() => {
-					if (note.id) {
-						void fetchVersions(note.id);
-					}
-				}}
-				onPreview={handlePreviewVersion}
-				onRestore={handleRestoreVersion}
-			/>
+			{/* AI Side Panel */}
+			<div
+				ref={aiPanelRef}
+				aria-hidden={!isAiPanelMounted}
+				className="relative h-full shrink-0 overflow-hidden"
+				style={{
+					pointerEvents: isAiPanelMounted ? undefined : "none",
+					backgroundColor: "var(--bg-sidebar)",
+					width:
+						typeof window !== "undefined" && window.innerWidth < 768 ? (isAiPanelMounted ? "100%" : 0) : isAiPanelMounted ? `${aiPanelWidth}px` : 0,
+					opacity: isAiPanelMounted ? 1 : 0,
+					transform: isAiPanelMounted ? "translateX(0)" : "translateX(12px)",
+					transition: isAiPanelResizing ? "none" : "width 220ms ease, opacity 160ms linear, transform 220ms ease",
+					willChange: "opacity, transform",
+				}}>
+				<div
+					onMouseDown={startAiPanelResize}
+					className={`${isAiPanelMounted ? "md:block" : "hidden"} absolute bottom-0 left-[-3px] top-0 z-30 w-3 cursor-ew-resize rounded duration-150`}
+					style={{
+						backgroundColor: isAiPanelResizing ? "rgba(124, 106, 255, 0.2)" : "transparent",
+					}}
+					onMouseEnter={(e) => {
+						if (!isAiPanelResizing) {
+							(e.currentTarget as HTMLElement).style.backgroundColor = "rgba(124, 106, 255, 0.16)";
+						}
+					}}
+					onMouseLeave={(e) => {
+						if (!isAiPanelResizing) {
+							(e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+						}
+					}}
+				/>
+				<AISidePanel
+					workspaceId={workspaceId}
+					noteId={note.id}
+					noteTitle={note.title}
+					noteContent={currentContentRef.current ?? note.content}
+					onAppendToNote={handleAppendAiContent}
+					isOpen={isAIPanelOpen}
+					onClose={() => setIsAIPanelOpen(false)}
+				/>
+			</div>
+
+			{marqueeRect && (
+				<div
+					className="pointer-events-none fixed z-40 stacknote-editor-selection-marquee"
+					style={{
+						left: marqueeRect.left,
+						top: marqueeRect.top,
+						width: marqueeRect.width,
+						height: marqueeRect.height,
+					}}
+				/>
+			)}
 		</div>
 	);
 }

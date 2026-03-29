@@ -169,6 +169,231 @@
   --bn-font-family: var(--font-sans);
 }
 
+/* Reduce reflow cost for long notes while resizing editor/panels. */
+.stacknote-editor-shell {
+  contain: layout style;
+}
+
+.stacknote-editor-root .bn-editor .ProseMirror>* {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 44px;
+}
+
+.stacknote-editor-root .bn-block-content.ProseMirror-selectednode>*,
+.stacknote-editor-root .ProseMirror-selectednode>.bn-block-content>* {  border-radius: 8px;
+  outline: 2px solid rgba(124, 106, 255, 0.7);
+  background: rgba(124, 106, 255, 0.08);
+}
+
+.stacknote-editor-selection-marquee {
+  box-sizing: border-box;
+  border: 1px solid rgba(124, 106, 255, 0.7);
+  border-radius: 5px;
+  background: rgba(124, 106, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(196, 188, 255, 0.05);
+}
+
+.stacknote-selected-block {
+  box-sizing: border-box;
+  border-color: rgba(124, 106, 255, 0.72);
+  background: rgba(124, 106, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(196, 188, 255, 0.04);
+  border-radius: 5px;
+}
+
+.stacknote-ai-markdown {
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.stacknote-ai-markdown> :first-child {
+  margin-top: 0;
+}
+
+.stacknote-ai-markdown> :last-child {
+  margin-bottom: 0;
+}
+
+.stacknote-ai-markdown p,
+.stacknote-ai-markdown ul,
+.stacknote-ai-markdown ol,
+.stacknote-ai-markdown pre,
+.stacknote-ai-markdown blockquote,
+.stacknote-ai-markdown h1,
+.stacknote-ai-markdown h2,
+.stacknote-ai-markdown h3,
+.stacknote-ai-markdown h4 {
+  margin: 0.7rem 0 0;
+}
+
+/* allow horizontal scroll for wide tables inside markdown container */
+.stacknote-ai-markdown {
+  -webkit-overflow-scrolling: touch;
+  overflow-x: auto;
+}
+
+.stacknote-ai-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+  margin: 0.7rem 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background-clip: padding-box;
+}
+
+.stacknote-ai-markdown h1,
+.stacknote-ai-markdown h2,
+.stacknote-ai-markdown h3,
+.stacknote-ai-markdown h4 {
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.stacknote-ai-markdown h1 {
+  font-size: 1.1rem;
+}
+
+.stacknote-ai-markdown h2 {
+  font-size: 1rem;
+}
+
+.stacknote-ai-markdown h3,
+.stacknote-ai-markdown h4 {
+  font-size: 0.95rem;
+}
+
+.stacknote-ai-markdown ul,
+.stacknote-ai-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.stacknote-ai-markdown ul {
+  list-style: disc;
+}
+
+.stacknote-ai-markdown ol {
+  list-style: decimal;
+}
+
+.stacknote-ai-markdown li+li {
+  margin-top: 0.25rem;
+}
+
+.stacknote-ai-markdown strong {
+  font-weight: 600;
+}
+
+.stacknote-ai-markdown em {
+  font-style: italic;
+}
+
+.stacknote-ai-markdown a {
+  color: var(--sn-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.stacknote-ai-markdown code {
+  border-radius: 6px;
+  background: var(--bg-hover);
+  padding: 0.12rem 0.38rem;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+.stacknote-ai-markdown pre {
+  overflow-x: auto;
+  border-radius: 10px;
+  background: var(--bg-hover);
+  padding: 0.8rem;
+}
+
+.stacknote-ai-markdown pre code {
+  display: block;
+  background: transparent;
+  padding: 0;
+  white-space: pre;
+}
+
+.stacknote-ai-markdown blockquote {
+  border-left: 2px solid rgba(124, 106, 255, 0.5);
+  padding-left: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* Tables inside AI-generated markdown (chat and note views) */
+.stacknote-ai-markdown {
+  /* allow horizontal scroll for wide tables */
+  -webkit-overflow-scrolling: touch;
+}
+
+.stacknote-ai-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.7rem 0;
+  display: block;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+}
+
+.stacknote-ai-markdown thead th {
+  background: linear-gradient(180deg, rgba(124, 106, 255, 0.06), transparent);
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  position: sticky;
+  top: 0;
+}
+
+.stacknote-ai-markdown tbody td,
+.stacknote-ai-markdown thead th {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 0.5rem 0.6rem;
+  vertical-align: middle;
+  font-size: 0.95rem;
+}
+
+.stacknote-ai-markdown tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.stacknote-ai-markdown td:first-child,
+.stacknote-ai-markdown th:first-child {
+  border-left: none;
+}
+
+.stacknote-ai-markdown td:last-child,
+.stacknote-ai-markdown th:last-child {
+  border-right: none;
+}
+
+/* Vertical dividers between columns — use adjacent selector for better support */
+.stacknote-ai-markdown th+th,
+.stacknote-ai-markdown td+td {
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Slightly stronger divider for header row to separate columns visually */
+.stacknote-ai-markdown thead th+th {
+  border-left: 1px solid rgba(124, 106, 255, 0.12);
+}
+
+.stacknote-ai-thought {
+  border: 1px solid rgba(124, 106, 255, 0.22);
+  background: rgba(124, 106, 255, 0.06);
+}
+
+.stacknote-ai-thought summary {
+  list-style: none;
+}
+
+.stacknote-ai-thought summary::-webkit-details-marker {
+  display: none;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

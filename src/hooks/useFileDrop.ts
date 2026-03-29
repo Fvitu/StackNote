@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 
 interface UseFileDropOptions {
-  onDropFiles: (files: File[]) => Promise<void>
+  onDropFiles: (files: File[], event: React.DragEvent<HTMLDivElement>) => Promise<void>
 }
 
 export function useFileDrop({ onDropFiles }: UseFileDropOptions) {
@@ -26,7 +26,7 @@ export function useFileDrop({ onDropFiles }: UseFileDropOptions) {
       setIsDragging(false)
       const files = Array.from(event.dataTransfer.files ?? [])
       if (!files.length) return
-      await onDropFiles(files)
+      await onDropFiles(files, event)
     },
     [onDropFiles],
   )

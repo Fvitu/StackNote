@@ -731,7 +731,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 					</div>
 				</div>
 			) : (
-				<div className="mx-auto mb-4 flex w-full max-w-[1180px] items-center justify-end gap-2">
+				<div className="mx-auto mb-4 flex w-full items-center justify-end gap-2">
 					<button
 						type="button"
 						onClick={() => setIsDialogOpen(true)}
