@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { isValidTextModel, isValidSttModel } from "@/lib/groq-models"
+import { getUserSettings, invalidateUserSettings } from "@/lib/server-data"
 import { prisma } from "@/lib/prisma"
-import { ensureDbReady } from "@/lib/dbInit"
-import {
-  isValidTextModel,
-  isValidSttModel,
-  resolveTextModel,
-  resolveSttModel,
-} from "@/lib/groq-models"
 
 export async function GET() {
   const session = await auth()
@@ -16,15 +11,12 @@ export async function GET() {
   }
 
   try {
-    await ensureDbReady(prisma)
+    const settings = await getUserSettings(session.user.id)
 
-    const settings = await prisma.userSettings.findUnique({
-      where: { userId: session.user.id },
-    })
-
-    return NextResponse.json({
-      preferredTextModel: resolveTextModel(undefined, settings?.preferredTextModel),
-      preferredSttModel: resolveSttModel(undefined, settings?.preferredSttModel),
+    return NextResponse.json(settings, {
+      headers: {
+        "Cache-Control": "private, max-age=60",
+      },
     })
   } catch (error) {
     console.error("Failed to load user settings:", error)
@@ -42,8 +34,6 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    await ensureDbReady(prisma)
-
     let body: { preferredTextModel?: string; preferredSttModel?: string }
     try {
       body = await req.json()
@@ -78,6 +68,8 @@ export async function PATCH(req: NextRequest) {
       },
       update: data,
     })
+
+    await invalidateUserSettings(session.user.id)
 
     return NextResponse.json({
       preferredTextModel: settings.preferredTextModel,

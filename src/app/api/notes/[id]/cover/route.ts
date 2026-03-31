@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { nanoid } from "nanoid"
 import { Prisma } from "@/generated/prisma/client"
 import { auth } from "@/lib/auth"
-import { ensureDbReady } from "@/lib/dbInit"
 import { prisma } from "@/lib/prisma"
 import { getFileExtension } from "@/lib/media"
 import { createAdminClient } from "@/lib/supabase/server"
@@ -20,7 +19,6 @@ function serializeCoverMeta(meta: NoteCoverMeta | null): Prisma.InputJsonValue |
 }
 
 async function getAuthorizedNote(noteId: string, userId: string) {
-  await ensureDbReady(prisma)
 
   const note = await prisma.note.findUnique({
     where: { id: noteId },

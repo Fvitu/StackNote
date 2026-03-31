@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { ensureDbReady } from "@/lib/dbInit"
 import { buildChatSessionTitle, normalizeContextNoteIds } from "@/lib/ai-chat-sessions"
 
 interface CreateSessionBody {
@@ -58,7 +57,6 @@ export async function GET(req: NextRequest) {
 		return jsonError("Unauthorized", 401)
 	}
 
-	await ensureDbReady(prisma)
 
 	const workspaceId = req.nextUrl.searchParams.get("workspaceId")?.trim()
 	const noteId = req.nextUrl.searchParams.get("noteId")?.trim()
@@ -125,7 +123,6 @@ export async function POST(req: NextRequest) {
 		return jsonError("Unauthorized", 401)
 	}
 
-	await ensureDbReady(prisma)
 
 	let body: CreateSessionBody
 	try {

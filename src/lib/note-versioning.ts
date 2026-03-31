@@ -1,5 +1,5 @@
 export const NOTE_CACHE_KEY = "stacknote:cache"
-export const NOTE_CACHE_LIMIT = 5
+export const NOTE_CACHE_LIMIT = 100;
 
 export const NOTE_VERSION_LIMIT = 50
 export const NOTE_VERSION_IDLE_THRESHOLD_MS = 5 * 60 * 1000

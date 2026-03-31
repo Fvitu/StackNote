@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
+import { cookies } from "next/headers"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { SESSION_COOKIE_NAME } from "@/lib/auth-cookie"
+import { invalidateSessionCache, invalidateUserProfileCache } from "@/lib/server-auth"
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -19,6 +22,14 @@ export async function PATCH(request: NextRequest) {
       where: { id: session.user.id },
       data: { name: name.trim() },
     })
+
+    await invalidateUserProfileCache(session.user.id)
+
+    const cookieStore = await cookies()
+    const sessionToken = cookieStore.get(SESSION_COOKIE_NAME)?.value
+    if (sessionToken) {
+      await invalidateSessionCache(sessionToken, session.user.id)
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {

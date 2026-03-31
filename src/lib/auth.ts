@@ -1,19 +1,132 @@
-import NextAuth from "next-auth"
-import { PrismaAdapter } from "@auth/prisma-adapter"
-import Resend from "next-auth/providers/resend"
-import Google from "next-auth/providers/google"
-import { prisma } from "@/lib/prisma"
-import { GUEST_INACTIVITY_MS, isGuestExpired, purgeGuestUser, scheduleGuestCleanup, touchGuestActivity } from "@/lib/guest-session";
+import { createHash } from "node:crypto";
+import NextAuth from "next-auth";
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import type { Adapter } from "@auth/core/adapters";
+import Resend from "next-auth/providers/resend";
+import Google from "next-auth/providers/google";
+import { Resend as ResendClient } from "resend";
+import { prisma } from "@/lib/prisma";
+import { buildMagicLinkEmail } from "@/lib/email/magic-link";
+import { GUEST_INACTIVITY_MS } from "@/lib/guest-session";
+import { invalidateSessionCache, invalidateUserProfileCache, getAuthSession } from "@/lib/server-auth";
 import { SESSION_COOKIE_NAME } from "@/lib/auth-cookie";
+
+function readEnvValue(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseUrl(value: string | undefined, base?: string): URL | null {
+	if (!value) {
+		return null;
+	}
+
+	try {
+		return base ? new URL(value, base) : new URL(value);
+	} catch {
+		if (!base && !value.startsWith("http://") && !value.startsWith("https://")) {
+			try {
+				return new URL(`https://${value}`);
+			} catch {
+				return null;
+			}
+		}
+
+		return null;
+	}
+}
+
+function resolveAuthBaseUrl(): string {
+	const configuredUrl =
+		readEnvValue(process.env.AUTH_URL) ??
+		readEnvValue(process.env.NEXTAUTH_URL) ??
+		readEnvValue(process.env.VERCEL_PROJECT_PRODUCTION_URL) ??
+		readEnvValue(process.env.VERCEL_URL);
+
+	const parsedConfiguredUrl = parseUrl(configuredUrl);
+	if (parsedConfiguredUrl) {
+		return parsedConfiguredUrl.origin;
+	}
+
+	return "http://localhost:3000";
+}
+
+function resolveAuthSecret(): string {
+	const configuredSecret = readEnvValue(process.env.AUTH_SECRET) ?? readEnvValue(process.env.NEXTAUTH_SECRET);
+	if (configuredSecret) {
+		return configuredSecret;
+	}
+
+	const fallbackSeed =
+		readEnvValue(process.env.DATABASE_URL) ??
+		readEnvValue(process.env.DIRECT_URL) ??
+		readEnvValue(process.env.POSTGRES_URL) ??
+		readEnvValue(process.env.VERCEL_URL) ??
+		"stacknote-auth-fallback";
+
+	console.warn("[auth] AUTH_SECRET/NEXTAUTH_SECRET is not set. Using a derived fallback secret; configure a dedicated secret in production.");
+	return createHash("sha256").update(fallbackSeed).digest("hex");
+}
+
+const authBaseUrl = resolveAuthBaseUrl();
+const authSecret = resolveAuthSecret();
+const resendApiKey = process.env.RESEND_API_KEY?.trim();
+const resendClient = resendApiKey ? new ResendClient(resendApiKey) : null;
+const resendFrom = readEnvValue(process.env.RESEND_FROM) ?? "StackNote <noreply@stacknote.fvitu.qzz.io>";
+
+if (!resendApiKey) {
+	console.warn("[auth] RESEND_API_KEY is not set. Email magic-link sign-in is disabled.");
+}
+
+function createCachedAdapter(): Adapter {
+	const baseAdapter = PrismaAdapter(prisma);
+
+	return {
+		...baseAdapter,
+		async updateSession(data) {
+			const session = await baseAdapter.updateSession?.(data);
+			if (data.sessionToken) {
+				await invalidateSessionCache(data.sessionToken, data.userId ?? session?.userId);
+			}
+			return session;
+		},
+	};
+}
 
 const _nextAuth = NextAuth({
 	trustHost: true,
-	adapter: PrismaAdapter(prisma),
+	secret: authSecret,
+	adapter: createCachedAdapter(),
 	providers: [
-		Resend({
-			apiKey: process.env.RESEND_API_KEY,
-			from: "StackNote <support@stacknote.fvitu.qzz.io>",
-		}),
+		...(resendApiKey
+			? [
+					Resend({
+						apiKey: resendApiKey,
+						from: resendFrom,
+						async sendVerificationRequest({ identifier: email, url, provider }) {
+							if (!resendClient) {
+								throw new Error("Email sign-in is not configured. Set RESEND_API_KEY.");
+							}
+
+							const resolvedUrl = parseUrl(url, authBaseUrl) ?? new URL(authBaseUrl);
+							const host = resolvedUrl.host;
+							const { html, text } = buildMagicLinkEmail({ url: resolvedUrl.toString(), host, email });
+
+							const { error } = await resendClient.emails.send({
+								from: provider.from as string,
+								to: [email],
+								subject: "Sign in to StackNote",
+								html,
+								text,
+							});
+
+							if (error) {
+								throw new Error(`Failed to send verification email: ${error.message}`);
+							}
+						},
+					}),
+				]
+			: []),
 		Google({
 			clientId: process.env.GOOGLE_CLIENT_ID,
 			clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -37,20 +150,19 @@ const _nextAuth = NextAuth({
 	},
 	callbacks: {
 		redirect({ url, baseUrl }) {
+			const safeBaseUrl = parseUrl(baseUrl)?.origin ?? authBaseUrl;
+			const safeBase = new URL(safeBaseUrl);
+
 			if (url.startsWith("/")) {
-				return `${baseUrl}${url}`;
+				return new URL(url, safeBase).toString();
 			}
 
-			try {
-				const destination = new URL(url);
-				if (destination.origin === baseUrl) {
-					return url;
-				}
-			} catch {
-				return baseUrl;
+			const destination = parseUrl(url, safeBase.toString());
+			if (destination && destination.origin === safeBase.origin) {
+				return destination.toString();
 			}
 
-			return baseUrl;
+			return safeBase.toString();
 		},
 		session({ session, user }) {
 			session.user.id = user.id;
@@ -73,6 +185,14 @@ const _nextAuth = NextAuth({
 				},
 			});
 		},
+		async signOut(message) {
+			if ("session" in message && message.session?.sessionToken) {
+				await invalidateSessionCache(message.session.sessionToken, message.session.userId);
+			}
+		},
+		async updateUser({ user }) {
+			await invalidateUserProfileCache(user.id!);
+		},
 	},
 });
 
@@ -80,52 +200,4 @@ export const handlers = _nextAuth.handlers;
 export const signIn = _nextAuth.signIn;
 export const signOut = _nextAuth.signOut;
 
-const baseAuth = _nextAuth.auth;
-
-export const auth = (async (...args: unknown[]) => {
-	const session = await (baseAuth as (...innerArgs: unknown[]) => Promise<unknown>)(...args);
-	void scheduleGuestCleanup();
-
-	if (!session || typeof session !== "object" || !("user" in session)) {
-		return session;
-	}
-
-	const typedSession = session as {
-		user?: {
-			id?: string;
-			isGuest?: boolean;
-			guestExpiresAt?: string;
-		};
-	};
-
-	if (!typedSession.user?.id || !typedSession.user.isGuest) {
-		return session;
-	}
-
-	const guestUser = await prisma.user.findUnique({
-		where: { id: typedSession.user.id },
-		select: {
-			isGuest: true,
-			guestLastActiveAt: true,
-		},
-	});
-
-	if (!guestUser?.isGuest) {
-		return session;
-	}
-
-	if (isGuestExpired(guestUser.guestLastActiveAt)) {
-		await purgeGuestUser(typedSession.user.id);
-		return null;
-	}
-
-	void touchGuestActivity(typedSession.user.id, guestUser.guestLastActiveAt).catch((error) => {
-		console.error("Failed to update guest activity:", error);
-	});
-
-	const activeAt = guestUser.guestLastActiveAt ?? new Date();
-	typedSession.user.isGuest = true;
-	typedSession.user.guestExpiresAt = new Date(activeAt.getTime() + GUEST_INACTIVITY_MS).toISOString();
-
-	return session;
-}) as typeof baseAuth;
+export const auth = getAuthSession;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { invalidateWorkspaceTree } from "@/lib/server-data"
 
 export async function PATCH(
   req: NextRequest,
@@ -33,6 +34,8 @@ export async function PATCH(
     data: { name },
   })
 
+  await invalidateWorkspaceTree(session.user.id, folder.workspaceId)
+
   return NextResponse.json(updated)
 }
 
@@ -61,6 +64,7 @@ export async function DELETE(
   }
 
   await prisma.folder.delete({ where: { id } })
+  await invalidateWorkspaceTree(session.user.id, folder.workspaceId)
 
   return NextResponse.json({ success: true })
 }

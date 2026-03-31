@@ -53,8 +53,6 @@ export async function autosaveNoteContent(
     data: { content: normalizedContent },
   })
 
-  await updateNoteSearchVector(tx, noteId)
-
   return {
     updatedNote,
     normalizedContent,

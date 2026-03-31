@@ -1,14 +1,13 @@
-"use client"
-
-import Image from "next/image";
+"use client";
 import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react"
+import { signIn } from "next-auth/react";
 import { AlertCircle, MailWarning, ShieldAlert, UserCircle, X } from "lucide-react";
+import { StackNoteLogo } from "@/components/branding/StackNoteLogo";
 import { GuestInfo } from "@/components/ui/GuestInfo";
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 
 type LoginNotice = {
 	title: string;
@@ -206,7 +205,7 @@ function LoginPageContent() {
 					<div
 						className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border"
 						style={{ borderColor: "var(--border-strong)", backgroundColor: "#0b0b0b" }}>
-						<Image src="/StackNote.png" alt="StackNote logo" width={38} height={38} priority className="h-9 w-9 rounded-md" />
+						<StackNoteLogo className="h-9 w-9 rounded-md" />
 					</div>
 					<h1 className="mb-2 text-2xl font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
 						Welcome to StackNote

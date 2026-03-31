@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { ensureDbReady } from "@/lib/dbInit"
 import { normalizeContextNoteIds } from "@/lib/ai-chat-sessions"
 
 interface UpdateSessionBody {
@@ -44,7 +43,6 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
 		return jsonError("Unauthorized", 401)
 	}
 
-	await ensureDbReady(prisma)
 
 	const { id } = await params
 	if (!id) {
@@ -110,7 +108,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 		return jsonError("Unauthorized", 401)
 	}
 
-	await ensureDbReady(prisma)
 
 	const { id } = await params
 	if (!id) {
@@ -175,7 +172,6 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
 		return jsonError("Unauthorized", 401)
 	}
 
-	await ensureDbReady(prisma)
 
 	const { id } = await params
 	if (!id) {

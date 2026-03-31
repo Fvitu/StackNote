@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { groq } from "@/lib/groq"
 import { prisma } from "@/lib/prisma"
-import { ensureDbReady } from "@/lib/dbInit"
 import {
   AI_LIMITS,
   FALLBACK_FLASHCARD_MODEL,
@@ -35,7 +34,7 @@ interface GeneratedDeck {
   cards: GeneratedCard[]
 }
 
-export const FLASHCARD_SYSTEM_PROMPT = `\
+const FLASHCARD_SYSTEM_PROMPT = `\
 You are a flashcard generation engine integrated into StackNote, a student study workspace.
 Your sole task is to analyze study material and produce a set of high-quality flashcards in JSON format.
  
@@ -71,7 +70,7 @@ Format:
 - Otherwise, detect the language of the study material and generate all cards (front and back) in that same language. Do not translate the content.
 - If the material mixes languages (e.g. English terms in a Spanish text), preserve that mix naturally — don't force uniformity.`
 
-export const FLASHCARD_USER_PREFIX = `Generate flashcards from the following study material:\n\n`
+const FLASHCARD_USER_PREFIX = `Generate flashcards from the following study material:\n\n`
 
 class QuotaExceededError extends Error {
   constructor(
@@ -269,7 +268,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  await ensureDbReady(prisma)
 
   let body: FlashcardRequest
   try {

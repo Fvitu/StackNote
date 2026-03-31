@@ -1,51 +1,90 @@
-"use client"
+"use client";
 
+import dynamic from "next/dynamic";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { WorkspaceProvider } from "@/contexts/WorkspaceContext"
-import { Sidebar } from "@/components/layout/Sidebar"
-import { MainContent } from "@/components/layout/MainContent"
-import { SearchModal } from "@/components/search/SearchModal";
-import { NameCaptureDialog } from "@/components/layout/NameCaptureDialog"
-import { AccountDialog } from "@/components/layout/AccountDialog";
-import { useWorkspace } from "@/contexts/WorkspaceContext"
-import type { WorkspaceTree, NoteTreeItem, FolderTreeItem } from "@/types"
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { WorkspaceProvider } from "@/contexts/WorkspaceContext";
+import { Sidebar } from "@/components/layout/Sidebar";
+import { MainContent } from "@/components/layout/MainContent";
+import { AppShellSkeleton } from "@/components/layout/AppShellSkeleton";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKeyboardShortcut } from "@/hooks/useKeyboardShortcut";
+import { fetchJson } from "@/lib/api-client";
+import { queryKeys } from "@/lib/query-keys";
+import type { BootstrapResponse } from "@/lib/bootstrap";
+import type { WorkspaceTree, NoteTreeItem, FolderTreeItem } from "@/types";
 import {
-  addNoteToTree,
-  removeNoteFromTree,
-  addFolderToTree,
-  removeFolderFromTree,
-  updateNoteInTree,
-  updateFolderInTree,
-  moveNoteInTree,
-  moveFolderInTree,
-} from "@/lib/tree-helpers"
+	addFolderToTree,
+	addNoteToTree,
+	moveFolderInTree,
+	moveNoteInTree,
+	removeFolderFromTree,
+	removeNoteFromTree,
+	updateFolderInTree,
+	updateNoteInTree,
+} from "@/lib/tree-helpers";
+
+const EMPTY_TREE: WorkspaceTree = { folders: [], rootNotes: [] };
+const SearchModalClient = dynamic(() => import("@/components/search/SearchModal").then((module) => module.SearchModal), { ssr: false });
+const NameCaptureDialogClient = dynamic(() => import("@/components/layout/NameCaptureDialog").then((module) => module.NameCaptureDialog), { ssr: false });
+const AccountDialogClient = dynamic(() => import("@/components/layout/AccountDialog").then((module) => module.AccountDialog), { ssr: false });
 
 interface AppShellProps {
-	workspaceId: string;
-	workspaceName: string;
-	userEmail: string;
-	userName: string;
-	isGoogleUser: boolean;
-	isGuestUser: boolean;
-	needsName: boolean;
 	children: React.ReactNode;
+	initialShell: {
+		workspaceName: string;
+		userName: string | null;
+		userEmail: string;
+		isGuestUser: boolean;
+		isGoogleUser: boolean;
+		needsName: boolean;
+	};
 }
 
-function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoogleUser, isGuestUser, needsName }: Omit<AppShellProps, "children">) {
-	const [tree, setTree] = useState<WorkspaceTree>({ folders: [], rootNotes: [] });
-	const [optimisticTree, setOptimisticTree] = useState<WorkspaceTree>({ folders: [], rootNotes: [] });
+function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
+	const queryClient = useQueryClient();
+	const bootstrapQuery = useQuery({
+		queryKey: queryKeys.bootstrap,
+		queryFn: () => fetchJson<BootstrapResponse>("/api/bootstrap"),
+		staleTime: 15_000,
+	});
+
+	const bootstrapData = bootstrapQuery.data;
+	const workspaceId = bootstrapData?.workspace.id ?? "";
+	const treeQuery = useQuery({
+		queryKey: queryKeys.workspaceTree(workspaceId),
+		queryFn: () => fetchJson<WorkspaceTree>(`/api/workspace/${workspaceId}/tree`),
+		enabled: workspaceId.length > 0,
+		initialData: bootstrapData?.tree,
+		staleTime: 30_000,
+	});
+
+	const tree = treeQuery.data ?? EMPTY_TREE;
 	const [searchOpen, setSearchOpen] = useState(false);
-	const [showNameDialog, setShowNameDialog] = useState(needsName);
+	const [showNameDialog, setShowNameDialog] = useState(initialShell.needsName);
 	const [accountDialogOpen, setAccountDialogOpen] = useState(false);
 	const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
-	const [currentWorkspaceName, setCurrentWorkspaceName] = useState(workspaceName);
-	const [currentUserName, setCurrentUserName] = useState(userName);
+	const [currentWorkspaceName, setCurrentWorkspaceName] = useState(initialShell.workspaceName);
+	const [currentUserName, setCurrentUserName] = useState(initialShell.userName ?? "");
 	const [isSidebarPreviewOpen, setIsSidebarPreviewOpen] = useState(false);
 	const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
 	const [canUseSidebarPreview, setCanUseSidebarPreview] = useState(false);
 	const { state, setActiveNote, toggleFolder, toggleSidebar, setSidebarOpen } = useWorkspace();
-	const pendingActionsRef = useRef<number>(0);
+
+	useEffect(() => {
+		if (!bootstrapData) {
+			return;
+		}
+
+		setCurrentWorkspaceName(bootstrapData.workspace.name);
+		setCurrentUserName(bootstrapData.user.name ?? "");
+		setShowNameDialog(bootstrapData.auth.needsName);
+		queryClient.setQueryData(queryKeys.currentWorkspace, bootstrapData.workspace);
+		queryClient.setQueryData(queryKeys.currentUser, bootstrapData.user);
+		queryClient.setQueryData(queryKeys.settings, bootstrapData.settings);
+		queryClient.setQueryData(queryKeys.aiUsage, bootstrapData.aiUsage);
+		queryClient.setQueryData(queryKeys.workspaceTree(bootstrapData.workspace.id), bootstrapData.tree);
+	}, [bootstrapData, queryClient]);
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
@@ -85,20 +124,14 @@ function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoog
 	}, [state.activeNoteId, activeFolderId]);
 
 	const fetchTree = useCallback(async () => {
-		const res = await fetch(`/api/workspace/${workspaceId}/tree`);
-		if (res.ok) {
-			const data = await res.json();
-			setTree(data);
-			// Only update optimistic tree if no pending actions
-			if (pendingActionsRef.current === 0) {
-				setOptimisticTree(data);
-			}
+		if (!workspaceId) {
+			return;
 		}
-	}, [workspaceId]);
 
-	useEffect(() => {
-		fetchTree();
-	}, [fetchTree]);
+		await queryClient.invalidateQueries({
+			queryKey: queryKeys.workspaceTree(workspaceId),
+		});
+	}, [queryClient, workspaceId]);
 
 	const showSidebarPreview = useCallback(() => {
 		if (state.isSidebarOpen) return;
@@ -158,40 +191,34 @@ function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoog
 		openSidebarDocked();
 	}, [isMobileSidebarMode, openSidebarDocked, state.isSidebarOpen, toggleSidebar]);
 
-	// Optimistic action wrapper
 	const optimisticAction = useCallback(
 		async <T,>(
-			optimisticUpdate: (tree: WorkspaceTree) => WorkspaceTree,
+			optimisticUpdate: (currentTree: WorkspaceTree) => WorkspaceTree,
 			serverAction: () => Promise<T>,
 			onSuccess?: (result: T) => void,
 		): Promise<T | null> => {
-			// Apply optimistic update immediately
-			setOptimisticTree((prev) => optimisticUpdate(prev));
-			pendingActionsRef.current++;
+			if (!workspaceId) {
+				return null;
+			}
+
+			const treeKey = queryKeys.workspaceTree(workspaceId);
+			const previousTree = queryClient.getQueryData<WorkspaceTree>(treeKey) ?? EMPTY_TREE;
+			queryClient.setQueryData(treeKey, optimisticUpdate(previousTree));
 
 			try {
 				const result = await serverAction();
-				if (onSuccess) onSuccess(result);
-				// Refresh from server
+				onSuccess?.(result);
 				await fetchTree();
 				return result;
 			} catch (error) {
 				console.error("Action failed:", error);
-				// Revert to server state
-				setOptimisticTree(tree);
+				queryClient.setQueryData(treeKey, previousTree);
 				return null;
-			} finally {
-				pendingActionsRef.current--;
-				if (pendingActionsRef.current === 0) {
-					// Sync with server when all actions complete
-					await fetchTree();
-				}
 			}
 		},
-		[tree, fetchTree],
+		[fetchTree, queryClient, workspaceId],
 	);
 
-	// Optimistic create note
 	const handleCreateNote = useCallback(
 		async (folderId?: string) => {
 			const tempId = `temp-${Date.now()}`;
@@ -203,25 +230,23 @@ function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoog
 			};
 
 			return optimisticAction(
-				(tree) => addNoteToTree(tree, tempNote, folderId),
+				(currentTree) => addNoteToTree(currentTree, tempNote, folderId),
 				async () => {
-					const res = await fetch("/api/notes", {
+					const note = await fetchJson<{ id: string }>("/api/notes", {
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify({ workspaceId, folderId }),
 					});
-					if (!res.ok) throw new Error("Failed to create note");
-					return res.json();
+					return note;
 				},
 				(newNote) => {
 					setActiveNote(newNote.id);
 				},
 			);
 		},
-		[workspaceId, optimisticAction, setActiveNote],
+		[optimisticAction, setActiveNote, workspaceId],
 	);
 
-	// Optimistic create folder
 	const handleCreateFolder = useCallback(
 		async (parentId?: string) => {
 			const tempId = `temp-folder-${Date.now()}`;
@@ -234,163 +259,139 @@ function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoog
 			};
 
 			return optimisticAction(
-				(tree) => addFolderToTree(tree, tempFolder, parentId),
+				(currentTree) => addFolderToTree(currentTree, tempFolder, parentId),
 				async () => {
-					const res = await fetch("/api/folders", {
+					const folder = await fetchJson<{ id: string }>("/api/folders", {
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify({ workspaceId, parentId, name: "New Folder" }),
 					});
-					if (!res.ok) throw new Error("Failed to create folder");
-					return res.json();
+					return folder;
 				},
 			);
 		},
-		[workspaceId, optimisticAction],
+		[optimisticAction, workspaceId],
 	);
 
-	// Optimistic delete note
 	const handleDeleteNote = useCallback(
 		async (noteId: string) => {
 			return optimisticAction(
-				(tree) => removeNoteFromTree(tree, noteId),
+				(currentTree) => removeNoteFromTree(currentTree, noteId),
 				async () => {
-					const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
-					if (!res.ok) throw new Error("Failed to delete note");
+					await fetchJson<{ success: boolean }>(`/api/notes/${noteId}`, { method: "DELETE" });
 				},
 			);
 		},
 		[optimisticAction],
 	);
 
-	// Optimistic delete folder
 	const handleDeleteFolder = useCallback(
 		async (folderId: string) => {
 			return optimisticAction(
-				(tree) => removeFolderFromTree(tree, folderId),
+				(currentTree) => removeFolderFromTree(currentTree, folderId),
 				async () => {
-					const res = await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
-					if (!res.ok) throw new Error("Failed to delete folder");
+					await fetchJson<{ success: boolean }>(`/api/folders/${folderId}`, { method: "DELETE" });
 				},
 			);
 		},
 		[optimisticAction],
 	);
 
-	// Optimistic rename note
 	const handleRenameNote = useCallback(
 		async (noteId: string, title: string) => {
 			return optimisticAction(
-				(tree) => updateNoteInTree(tree, noteId, { title }),
+				(currentTree) => updateNoteInTree(currentTree, noteId, { title }),
 				async () => {
-					const res = await fetch(`/api/notes/${noteId}`, {
+					await fetchJson(`/api/notes/${noteId}`, {
 						method: "PATCH",
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify({ title }),
 					});
-					if (!res.ok) throw new Error("Failed to rename note");
 				},
 			);
 		},
 		[optimisticAction],
 	);
 
-	// Optimistic rename folder
 	const handleRenameFolder = useCallback(
 		async (folderId: string, name: string) => {
 			return optimisticAction(
-				(tree) => updateFolderInTree(tree, folderId, { name }),
+				(currentTree) => updateFolderInTree(currentTree, folderId, { name }),
 				async () => {
-					const res = await fetch(`/api/folders/${folderId}`, {
+					await fetchJson(`/api/folders/${folderId}`, {
 						method: "PATCH",
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify({ name }),
 					});
-					if (!res.ok) throw new Error("Failed to rename folder");
 				},
 			);
 		},
 		[optimisticAction],
 	);
 
-	// Optimistic move note
 	const handleMoveNote = useCallback(
 		async (noteId: string, folderId: string | null) => {
 			return optimisticAction(
-				(tree) => moveNoteInTree(tree, noteId, folderId),
+				(currentTree) => moveNoteInTree(currentTree, noteId, folderId),
 				async () => {
-					const res = await fetch(`/api/notes/${noteId}`, {
+					await fetchJson(`/api/notes/${noteId}`, {
 						method: "PATCH",
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify({ folderId }),
 					});
-					if (!res.ok) throw new Error("Failed to move note");
 				},
 			);
 		},
 		[optimisticAction],
 	);
 
-	// Optimistic move folder
 	const handleMoveFolder = useCallback(
 		async (folderId: string, parentId: string | null) => {
 			return optimisticAction(
-				(tree) => moveFolderInTree(tree, folderId, parentId),
+				(currentTree) => moveFolderInTree(currentTree, folderId, parentId),
 				async () => {
-					const res = await fetch(`/api/folders/${folderId}`, {
+					await fetchJson(`/api/folders/${folderId}`, {
 						method: "PATCH",
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify({ parentId }),
 					});
-					if (!res.ok) throw new Error("Failed to move folder");
 				},
 			);
 		},
 		[optimisticAction],
 	);
 
-	// Handle name submission for magic link users
 	const updateUserName = useCallback(async (name: string) => {
-		try {
-			const res = await fetch("/api/user/name", {
+		await fetchJson<{ success: boolean }>("/api/user/name", {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ name }),
+		});
+
+		setCurrentUserName(name);
+		queryClient.setQueryData(queryKeys.currentUser, (currentUser: BootstrapResponse["user"] | undefined) =>
+			currentUser
+				? {
+						...currentUser,
+						name,
+					}
+				: currentUser,
+		);
+		setShowNameDialog(false);
+	}, [queryClient]);
+
+	const updateWorkspaceName = useCallback(
+		async (name: string) => {
+			const workspace = await fetchJson<{ id: string; name: string }>(`/api/workspace/${workspaceId}`, {
 				method: "PATCH",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ name }),
 			});
 
-			if (!res.ok) {
-				throw new Error("Failed to update name");
-			}
-
-			setCurrentUserName(name);
-			setShowNameDialog(false);
-		} catch (error) {
-			console.error("Failed to update name:", error);
-			throw error;
-		}
-	}, []);
-
-	const updateWorkspaceName = useCallback(
-		async (name: string) => {
-			try {
-				const res = await fetch(`/api/workspace/${workspaceId}`, {
-					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ name }),
-				});
-
-				if (!res.ok) {
-					throw new Error("Failed to update workspace");
-				}
-
-				setCurrentWorkspaceName(name);
-				await fetchTree();
-			} catch (error) {
-				console.error("Failed to update workspace:", error);
-				throw error;
-			}
+			setCurrentWorkspaceName(workspace.name);
+			queryClient.setQueryData(queryKeys.currentWorkspace, workspace);
 		},
-		[workspaceId, fetchTree],
+		[queryClient, workspaceId],
 	);
 
 	const handleNameSubmit = useCallback(
@@ -406,57 +407,57 @@ function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoog
 		[updateUserName],
 	);
 
-	useKeyboardShortcut("k", () => setSearchOpen((v) => !v), { metaOrCtrl: true, preventDefault: true });
+	useKeyboardShortcut("k", () => setSearchOpen((value) => !value), { metaOrCtrl: true, preventDefault: true });
 	useKeyboardShortcut("\\", () => toggleSidebar(), { metaOrCtrl: true, preventDefault: true });
 
 	const sidebarProps = useMemo(
-		() => ({
-			workspaceId,
-			workspaceName: currentWorkspaceName,
-			userEmail,
-			userName: currentUserName,
-			isGoogleUser,
-			isGuestUser,
-			tree: optimisticTree,
-			onRefresh: fetchTree,
-			onSearchOpen: () => setSearchOpen(true),
-			onAccountOpen: () => {
-				setAccountDialogOpen(true);
-				// Close the sidebar on small screens when opening account panel
-				if (typeof window !== "undefined" && (isMobileSidebarMode || window.innerWidth < 768)) {
-					setSidebarOpen(false);
-				}
-			},
-			onCreateNote: handleCreateNote,
-			onCreateFolder: handleCreateFolder,
-			onDeleteNote: handleDeleteNote,
-			onDeleteFolder: handleDeleteFolder,
-			onRenameNote: handleRenameNote,
-			onRenameFolder: handleRenameFolder,
-			onMoveNote: handleMoveNote,
-			onMoveFolder: handleMoveFolder,
-			onFolderVisited: setActiveFolderId,
-		}),
+		() =>
+			bootstrapData
+				? {
+						workspaceId,
+						workspaceName: currentWorkspaceName,
+						userEmail: bootstrapData.auth.isGuestUser ? "" : bootstrapData.user.email,
+						userName: currentUserName,
+						isGoogleUser: bootstrapData.auth.isGoogleUser,
+						isGuestUser: bootstrapData.auth.isGuestUser,
+						tree,
+						onRefresh: fetchTree,
+						onSearchOpen: () => setSearchOpen(true),
+						onAccountOpen: () => {
+							setAccountDialogOpen(true);
+							if (typeof window !== "undefined" && (isMobileSidebarMode || window.innerWidth < 768)) {
+								setSidebarOpen(false);
+							}
+						},
+						onCreateNote: handleCreateNote,
+						onCreateFolder: handleCreateFolder,
+						onDeleteNote: handleDeleteNote,
+						onDeleteFolder: handleDeleteFolder,
+						onRenameNote: handleRenameNote,
+						onRenameFolder: handleRenameFolder,
+						onMoveNote: handleMoveNote,
+						onMoveFolder: handleMoveFolder,
+						onFolderVisited: setActiveFolderId,
+				  }
+				: null,
 		[
-			workspaceId,
-			currentWorkspaceName,
-			userEmail,
+			bootstrapData,
 			currentUserName,
-			isGoogleUser,
-			isGuestUser,
-			optimisticTree,
+			currentWorkspaceName,
 			fetchTree,
-			handleCreateNote,
 			handleCreateFolder,
-			handleDeleteNote,
+			handleCreateNote,
 			handleDeleteFolder,
-			handleRenameNote,
-			handleRenameFolder,
-			handleMoveNote,
+			handleDeleteNote,
 			handleMoveFolder,
+			handleMoveNote,
+			handleRenameFolder,
+			handleRenameNote,
 			isMobileSidebarMode,
+			queryClient,
 			setSidebarOpen,
-			setAccountDialogOpen,
+			tree,
+			workspaceId,
 		],
 	);
 
@@ -470,6 +471,33 @@ function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoog
 		window.addEventListener("keydown", onEscape);
 		return () => window.removeEventListener("keydown", onEscape);
 	}, []);
+
+	if (bootstrapQuery.isError) {
+		return (
+			<div className="flex h-screen items-center justify-center" style={{ backgroundColor: "#000000", color: "var(--text-primary)" }}>
+				<div className="space-y-4 text-center">
+					<p className="text-sm">Failed to load your workspace.</p>
+					<button
+						type="button"
+						onClick={() => void bootstrapQuery.refetch()}
+						className="rounded-[var(--sn-radius-md)] px-4 py-2 text-sm"
+						style={{ backgroundColor: "var(--accent-muted)", color: "var(--sn-accent)" }}>
+						Retry
+					</button>
+				</div>
+			</div>
+		);
+	}
+
+	if (bootstrapQuery.isPending || !bootstrapData || !sidebarProps) {
+		return (
+			<AppShellSkeleton
+				workspaceName={currentWorkspaceName || initialShell.workspaceName}
+				userName={currentUserName || initialShell.userName}
+				userEmail={initialShell.userEmail}
+			/>
+		);
+	}
 
 	return (
 		<div className="relative flex h-screen overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
@@ -512,8 +540,9 @@ function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoog
 				onRefresh={fetchTree}
 				isSidebarOpen={state.isSidebarOpen}
 				onToggleSidebar={handleSidebarToggleButton}
+				tree={tree}
 			/>
-			<SearchModal
+			<SearchModalClient
 				workspaceId={workspaceId}
 				open={searchOpen}
 				onSelectNote={(id) => {
@@ -524,34 +553,26 @@ function AppShellInner({ workspaceId, workspaceName, userEmail, userName, isGoog
 				}}
 				onClose={() => setSearchOpen(false)}
 			/>
-			<AccountDialog
+			<AccountDialogClient
 				open={accountDialogOpen}
 				userName={currentUserName}
-				userEmail={userEmail}
+				userEmail={bootstrapData.auth.isGuestUser ? "" : bootstrapData.user.email}
 				workspaceName={currentWorkspaceName}
-				isGoogleUser={isGoogleUser}
-				isGuestUser={isGuestUser}
+				isGoogleUser={bootstrapData.auth.isGoogleUser}
+				isGuestUser={bootstrapData.auth.isGuestUser}
 				onClose={() => setAccountDialogOpen(false)}
 				onSaveUserName={updateUserName}
 				onSaveWorkspaceName={updateWorkspaceName}
 			/>
-			<NameCaptureDialog open={showNameDialog} onNameSubmit={handleNameSubmit} />
+			<NameCaptureDialogClient open={showNameDialog} onNameSubmit={handleNameSubmit} />
 		</div>
 	);
 }
 
-export function AppShell({ workspaceId, workspaceName, userEmail, userName, isGoogleUser, isGuestUser, needsName }: AppShellProps) {
+export function AppShell({ initialShell }: AppShellProps) {
 	return (
 		<WorkspaceProvider>
-			<AppShellInner
-				workspaceId={workspaceId}
-				workspaceName={workspaceName}
-				userEmail={userEmail}
-				userName={userName}
-				isGoogleUser={isGoogleUser}
-				isGuestUser={isGuestUser}
-				needsName={needsName}
-			/>
+			<AppShellInner initialShell={initialShell} />
 		</WorkspaceProvider>
 	);
 }

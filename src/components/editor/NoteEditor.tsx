@@ -1,7 +1,8 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useCallback, useEffect, forwardRef, useImperativeHandle, useMemo, useRef, useState, type WheelEvent } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, forwardRef, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from "react";
 import {
 	useCreateBlockNote,
 	SuggestionMenuController,
@@ -22,10 +23,11 @@ import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from "@
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu, SuggestionMenu as SuggestionMenuExtension } from "@blocknote/core/extensions";
 import { offset, shift, size } from "@floating-ui/react";
 import type { DefaultReactSuggestionItem } from "@blocknote/react";
-import { ImageIcon, FileText, Music, Video, Sigma, Code, Download, Sparkles } from "lucide-react";
+import { ImageIcon, FileText, Music, Video, Sigma, Code, Download, Sparkles, Smile } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { customBlockSpecs } from "@/components/editor/blocks";
 import { customInlineContentSpecs } from "@/components/editor/inline";
+import { EmojiPickerSkeleton } from "@/components/layout/AppShellSkeleton";
 import { getAcceptForType, getMediaTypeFromFile, parseVideoEmbedUrl, type MediaType } from "@/lib/media";
 import { uploadFileForNote } from "@/lib/upload";
 import { useFileDrop } from "@/hooks/useFileDrop";
@@ -90,6 +92,160 @@ type Point = {
 	x: number;
 	y: number;
 };
+
+type EmojiPanelPosition = {
+	left: number;
+	top: number;
+};
+
+type EmojiSelection = {
+	emoji: string;
+};
+
+type NoteEmojiPickerProps = {
+	onEmojiClick: (emojiData: EmojiSelection) => void;
+	autoFocusSearch?: boolean;
+	lazyLoadEmojis?: boolean;
+	searchPlaceholder?: string;
+	previewConfig?: {
+		showPreview: boolean;
+	};
+	width?: string | number;
+	height?: string | number;
+	style?: CSSProperties;
+};
+
+const STACKNOTE_BLOCK_CLIPBOARD_MIME = "application/x-stacknote-blocks+json";
+const EMOJI_PANEL_MARGIN = 8;
+const EMOJI_PANEL_WIDTH = 360;
+const EMOJI_PANEL_HEIGHT = 408;
+const EmojiPickerClient = dynamic(
+	async () => {
+		const module = await import("emoji-picker-react");
+		const EmojiPicker = module.default;
+
+		return function NoteEmojiPicker({
+			onEmojiClick,
+			autoFocusSearch,
+			lazyLoadEmojis,
+			searchPlaceholder,
+			previewConfig,
+			width,
+			height,
+			style,
+		}: NoteEmojiPickerProps) {
+			return (
+				<EmojiPicker
+					onEmojiClick={onEmojiClick}
+					theme={module.Theme.DARK}
+					emojiStyle={module.EmojiStyle.APPLE}
+					autoFocusSearch={autoFocusSearch}
+					lazyLoadEmojis={lazyLoadEmojis}
+					searchPlaceholder={searchPlaceholder}
+					previewConfig={previewConfig}
+					width={width}
+					height={height}
+					style={style}
+				/>
+			);
+		};
+	},
+	{
+		ssr: false,
+		loading: () => <EmojiPickerSkeleton />,
+	},
+);
+
+type StackNoteClipboardPayload = {
+	version: 1;
+	blocks: unknown[];
+};
+
+type SerializedClipboardBlocks = {
+	json: string;
+	html: string;
+	plainText: string;
+};
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function cloneBlockForClipboard(block: unknown): unknown {
+	if (!isPlainObject(block)) {
+		return block;
+	}
+
+	const { id: _id, children, ...rest } = block;
+	const nextBlock: Record<string, unknown> = { ...rest };
+
+	if (Array.isArray(children)) {
+		nextBlock.children = children.map((child) => cloneBlockForClipboard(child));
+	}
+
+	return nextBlock;
+}
+
+function getClipboardBlocks(editor: any, root: HTMLElement, selectedBlockIds: string[]): unknown[] {
+	return getTopLevelSelectedBlockIds(root, selectedBlockIds)
+		.map((blockId) => editor.getBlock(blockId))
+		.filter((block): block is unknown => Boolean(block))
+		.map((block) => cloneBlockForClipboard(block));
+}
+
+function serializeSelectedBlocksForClipboard(editor: any, root: HTMLElement, selectedBlockIds: string[]): SerializedClipboardBlocks | null {
+	const blocks = getClipboardBlocks(editor, root, selectedBlockIds);
+	if (blocks.length === 0) {
+		return null;
+	}
+
+	const normalizedBlocks = normalizeBlockNoteContent(blocks);
+	const payload: StackNoteClipboardPayload = {
+		version: 1,
+		blocks: Array.isArray(normalizedBlocks) ? normalizedBlocks : blocks,
+	};
+
+	let html = "";
+	let plainText = "";
+	try {
+		html = editor.blocksToFullHTML(payload.blocks as any);
+	} catch {
+		html = "";
+	}
+
+	try {
+		plainText = editor.blocksToMarkdownLossy(payload.blocks as any);
+	} catch {
+		plainText = "";
+	}
+
+	return {
+		json: JSON.stringify(payload),
+		html,
+		plainText,
+	};
+}
+
+function readStackNoteClipboardBlocks(value: string): unknown[] | null {
+	if (!value) {
+		return null;
+	}
+
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		const blocks = Array.isArray(parsed) ? parsed : isPlainObject(parsed) && Array.isArray(parsed.blocks) ? parsed.blocks : null;
+
+		if (!blocks) {
+			return null;
+		}
+
+		const clonedBlocks = blocks.map((block) => cloneBlockForClipboard(block));
+		const normalizedBlocks = normalizeBlockNoteContent(clonedBlocks);
+		return Array.isArray(normalizedBlocks) ? normalizedBlocks : clonedBlocks;
+	} catch {
+		return null;
+	}
+}
 
 const REPLACE_HIDDEN_BLOCK_TYPES = new Set(["imageMedia", "pdfMedia", "audioMedia"]);
 const RENAME_HIDDEN_BLOCK_TYPES = new Set(["imageMedia"]);
@@ -298,13 +454,18 @@ function extractTextContent(value: unknown): string {
 	return "";
 }
 
-function getBlockText(block: unknown): string {
+function getTrimmedBlockText(block: unknown): string {
 	if (!block || typeof block !== "object") {
 		return "";
 	}
 
 	const current = block as MinimalBlock;
 	return extractTextContent(current.content).trim();
+}
+
+function getBlockContentType(editor: ReturnType<typeof useCreateBlockNote>, blockType: string): string | undefined {
+	const blockSchema = editor.schema.blockSchema as Record<string, { content?: string }>;
+	return blockSchema[blockType]?.content;
 }
 
 function buildLinkPreviewProps(parts: UrlTransformParts, overrides: Partial<LinkPreviewProps> = {}): LinkPreviewProps {
@@ -370,8 +531,8 @@ interface NoteEditorProps {
 	workspaceId: string;
 	noteId: string;
 	initialContent: unknown;
-	onSave: (content: unknown) => Promise<void>;
-	onContentChange?: (content: unknown) => void;
+	onSave: (noteId: string, content: unknown) => Promise<void>;
+	onContentChange?: (noteId: string, content: unknown) => void;
 }
 
 export interface NoteEditorRef {
@@ -543,8 +704,14 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 	const blockSelectionKeyRef = useRef("");
 	const blockSelectionStartPointRef = useRef<Point | null>(null);
 	const blockSelectionAnchorIdRef = useRef<string | null>(null);
+	const emojiPanelRef = useRef<HTMLDivElement | null>(null);
 	const [pickerType, setPickerType] = useState<MediaType>("image");
 	const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
+	const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
+	const [emojiPanelPosition, setEmojiPanelPosition] = useState<EmojiPanelPosition>({
+		left: EMOJI_PANEL_MARGIN,
+		top: EMOJI_PANEL_MARGIN,
+	});
 
 	const editorSchema = useMemo(
 		() =>
@@ -568,6 +735,21 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 				const clipboard = event.clipboardData;
 				if (!clipboard) {
 					return defaultPasteHandler();
+				}
+
+				const stackNoteClipboardBlocks = readStackNoteClipboardBlocks(clipboard.getData(STACKNOTE_BLOCK_CLIPBOARD_MIME));
+				if (stackNoteClipboardBlocks) {
+					if (stackNoteClipboardBlocks.length === 0) {
+						return true;
+					}
+
+					const cursorBlock = editor.getTextCursorPosition().block;
+					if (!cursorBlock) {
+						return false;
+					}
+
+					editor.insertBlocks(stackNoteClipboardBlocks as any, cursorBlock, "after");
+					return true;
 				}
 
 				const imageFiles = getClipboardImageFiles(clipboard);
@@ -618,8 +800,8 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 		[noteId],
 	);
 
-	const debouncedSave = useDebouncedCallback(async (content: unknown) => {
-		await onSave(content);
+	const debouncedSave = useDebouncedCallback(async (content: unknown, targetNoteId: string) => {
+		await onSave(targetNoteId, content);
 	}, 1500);
 
 	const transformUrlBlockToEmbed = useCallback(
@@ -633,7 +815,7 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 				return;
 			}
 
-			const parts = extractUrlTransformParts(getBlockText(currentBlock));
+			const parts = extractUrlTransformParts(getTrimmedBlockText(currentBlock));
 			if (!parts) {
 				return;
 			}
@@ -650,6 +832,10 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 					return;
 				}
 				previewBlockId = previewBlock.id;
+
+				if (typeof navigator !== "undefined" && !navigator.onLine) {
+					throw new Error("Cannot fetch link preview while offline");
+				}
 
 				const response = await fetch(`/api/link-preview?url=${encodeURIComponent(parts.url)}`);
 				if (!response.ok) {
@@ -703,13 +889,14 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 	useEffect(() => {
 		return editor.onChange(() => {
 			const content = editor.document;
-			onContentChange?.(content);
-			debouncedSave(content);
+			onContentChange?.(noteId, content);
+			debouncedSave(content, noteId);
 		});
-	}, [debouncedSave, editor, onContentChange]);
+	}, [debouncedSave, editor, noteId, onContentChange]);
 
 	useEffect(() => {
 		return () => {
+			void debouncedSave.flush();
 			debouncedSave.cancel();
 		};
 	}, [debouncedSave]);
@@ -729,7 +916,7 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 			}
 
 			const currentBlock = editor.getTextCursorPosition().block;
-			if (!extractUrlTransformParts(getBlockText(currentBlock))) {
+			if (!extractUrlTransformParts(getTrimmedBlockText(currentBlock))) {
 				return;
 			}
 
@@ -985,8 +1172,153 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 		} as any);
 	}, [editor, noteId, workspaceId]);
 
+	const closeEmojiPanel = useCallback(() => {
+		setEmojiPanelOpen(false);
+	}, []);
+
+	const openEmojiPanel = useCallback(() => {
+		const rootElement = editorRootRef.current;
+		const defaultPosition: EmojiPanelPosition = {
+			left: EMOJI_PANEL_MARGIN,
+			top: EMOJI_PANEL_MARGIN,
+		};
+
+		if (!rootElement) {
+			setEmojiPanelPosition(defaultPosition);
+			setEmojiPanelOpen(true);
+			return;
+		}
+
+		let nextPosition = defaultPosition;
+		try {
+			const selection = editor.prosemirrorState.selection;
+			const cursorCoords = editor.prosemirrorView.coordsAtPos(selection.from);
+			const rootRect = rootElement.getBoundingClientRect();
+			const panelWidth = Math.min(EMOJI_PANEL_WIDTH, Math.max(0, rootRect.width - EMOJI_PANEL_MARGIN * 2));
+			const maxLeft = Math.max(EMOJI_PANEL_MARGIN, rootRect.width - panelWidth - EMOJI_PANEL_MARGIN);
+			const maxTop = Math.max(EMOJI_PANEL_MARGIN, rootRect.height - EMOJI_PANEL_HEIGHT - EMOJI_PANEL_MARGIN);
+
+			nextPosition = {
+				left: Math.max(EMOJI_PANEL_MARGIN, Math.min(maxLeft, cursorCoords.left - rootRect.left)),
+				top: Math.max(EMOJI_PANEL_MARGIN, Math.min(maxTop, cursorCoords.bottom - rootRect.top + EMOJI_PANEL_MARGIN)),
+			};
+		} catch {
+			nextPosition = defaultPosition;
+		}
+
+		setEmojiPanelPosition(nextPosition);
+		setEmojiPanelOpen(true);
+	}, [editor]);
+
+	const handleEmojiPickerClick = useCallback(
+		(emojiData: EmojiSelection) => {
+			editor.insertInlineContent(emojiData.emoji, { updateSelection: true });
+			closeEmojiPanel();
+			editor.focus();
+		},
+		[closeEmojiPanel, editor],
+	);
+
+	const openEmojiPanelFromSlash = useCallback(() => {
+		insertOrUpdateBlockForSlashMenu(editor, {
+			type: "paragraph",
+			content: "",
+		} as any);
+
+		window.requestAnimationFrame(() => {
+			editor.focus();
+			openEmojiPanel();
+		});
+	}, [editor, openEmojiPanel]);
+
+	useEffect(() => {
+		if (!emojiPanelOpen) {
+			return;
+		}
+
+		const handleMouseDown = (event: MouseEvent) => {
+			const target = event.target;
+			if (!(target instanceof Node)) {
+				return;
+			}
+
+			if (emojiPanelRef.current?.contains(target)) {
+				return;
+			}
+
+			closeEmojiPanel();
+		};
+
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") {
+				return;
+			}
+
+			event.preventDefault();
+			closeEmojiPanel();
+			editor.focus();
+		};
+
+		document.addEventListener("mousedown", handleMouseDown, true);
+		document.addEventListener("keydown", handleEscape, true);
+
+		return () => {
+			document.removeEventListener("mousedown", handleMouseDown, true);
+			document.removeEventListener("keydown", handleEscape, true);
+		};
+	}, [closeEmojiPanel, editor, emojiPanelOpen]);
+
+	useEffect(() => {
+		const rootElement = editor.domElement;
+		if (!rootElement) {
+			return;
+		}
+
+		const onKeyDown = (event: KeyboardEvent) => {
+			const targetNode = event.target instanceof Node ? event.target : null;
+			if (!targetNode || !rootElement.contains(targetNode)) {
+				return;
+			}
+
+			if (event.key !== ":" || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) {
+				return;
+			}
+
+			const selection = editor.prosemirrorState.selection;
+			if (!selection.empty) {
+				return;
+			}
+
+			const currentBlock = editor.getTextCursorPosition().block;
+			if (!currentBlock) {
+				return;
+			}
+
+			const currentBlockType = currentBlock.type as string;
+			if (getBlockContentType(editor, currentBlockType) === "none") {
+				return;
+			}
+
+			event.preventDefault();
+			openEmojiPanel();
+		};
+
+		document.addEventListener("keydown", onKeyDown, true);
+		return () => {
+			document.removeEventListener("keydown", onKeyDown, true);
+		};
+	}, [editor, openEmojiPanel]);
+
 	const mediaSlashItems = useMemo<DefaultReactSuggestionItem[]>(() => {
 		return [
+			{
+				title: "Emoji",
+				subtext: "Search and insert an emoji",
+				aliases: ["emote", "icon", "smile"],
+				icon: <Smile size={16} />,
+				group: "Basic blocks",
+				onItemClick: openEmojiPanelFromSlash,
+			},
 			{
 				title: "Image",
 				subtext: "Upload or embed an image",
@@ -1037,11 +1369,13 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 				onItemClick: insertAIBlock,
 			},
 		];
-	}, [insertAIBlock, insertCodeBlock, insertEquation, insertVideoEmbed, openUploadPicker]);
+	}, [insertAIBlock, insertCodeBlock, insertEquation, insertVideoEmbed, openEmojiPanelFromSlash, openUploadPicker]);
 
 	const slashItems = useMemo(() => {
 		// Remove default "Media" group items so only our custom media upload items appear
-		const defaults = getDefaultReactSlashMenuItems(editor).filter((item) => item.title !== "Code Block" && item.group !== "Media");
+		const defaults = getDefaultReactSlashMenuItems(editor).filter(
+			(item) => item.title !== "Code Block" && item.group !== "Media" && item.title !== "Emoji",
+		);
 		// Keep items from the same group contiguous because BlockNote keys group labels by group name.
 		return groupSlashItems([...defaults, ...mediaSlashItems]);
 	}, [editor, mediaSlashItems]);
@@ -1112,11 +1446,19 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 		if (typeof window !== "undefined") {
 			window.getSelection()?.removeAllRanges();
 		}
+	}, []);
+
+	const focusBlockSelection = useCallback(() => {
+		if (typeof document === "undefined") {
+			return;
+		}
 
 		const activeElement = document.activeElement;
-		if (activeElement instanceof HTMLElement && editorRootRef.current?.contains(activeElement)) {
+		if (activeElement instanceof HTMLElement && activeElement !== editorRootRef.current) {
 			activeElement.blur();
 		}
+
+		editorRootRef.current?.focus({ preventScroll: true });
 	}, []);
 
 	const clearBlockSelection = useCallback(() => {
@@ -1126,6 +1468,78 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 		clearBrowserTextSelection();
 		setSelectedBlockIds([]);
 	}, [clearBrowserTextSelection]);
+
+	const removeSelectedBlocks = useCallback(
+		(event?: KeyboardEvent) => {
+			if (selectedBlockIds.length === 0) {
+				return false;
+			}
+
+			event?.preventDefault();
+			event?.stopImmediatePropagation();
+
+			const rootElement = editorRootRef.current;
+			if (!rootElement) {
+				return false;
+			}
+
+			const blocksToRemove = getTopLevelSelectedBlockIds(rootElement, selectedBlockIds).filter((id) => Boolean(editor.getBlock(id)));
+			if (blocksToRemove.length === 0) {
+				clearBlockSelection();
+				return false;
+			}
+
+			const firstBlock = editor.getBlock(blocksToRemove[0]);
+			const lastBlock = editor.getBlock(blocksToRemove[blocksToRemove.length - 1]);
+			const isWholeDocumentSelection = blocksToRemove.length === editor.document.length;
+			const canUseNativeSelection =
+				blocksToRemove.length > 1 &&
+				Boolean(firstBlock && lastBlock) &&
+				getBlockContentType(editor, firstBlock!.type) !== "none" &&
+				getBlockContentType(editor, lastBlock!.type) !== "none";
+
+			if (isWholeDocumentSelection || !canUseNativeSelection) {
+				editor.removeBlocks(blocksToRemove);
+				clearBlockSelection();
+				return true;
+			}
+
+			try {
+				editor.setSelection(blocksToRemove[0], blocksToRemove[blocksToRemove.length - 1]);
+				const tiptapEditor = editor._tiptapEditor as unknown as {
+					commands?: {
+						deleteSelection?: () => boolean;
+					};
+					chain?: () => {
+						deleteSelection?: () => { run?: () => boolean };
+					};
+				};
+				let deleted = false;
+				const deleteSelection = tiptapEditor.commands?.deleteSelection;
+				if (typeof deleteSelection === "function") {
+					deleted = deleteSelection() !== false;
+				} else {
+					const chain = tiptapEditor.chain?.();
+					const chainedDeleteSelection = chain?.deleteSelection;
+					if (typeof chainedDeleteSelection === "function") {
+						const result = chainedDeleteSelection.call(chain);
+						if (typeof result?.run === "function") {
+							deleted = result.run() !== false;
+						}
+					}
+				}
+				if (!deleted) {
+					editor.removeBlocks(blocksToRemove);
+				}
+			} catch (err) {
+				console.error("Failed to remove selected blocks", err);
+				editor.removeBlocks(blocksToRemove);
+			}
+			clearBlockSelection();
+			return true;
+		},
+		[clearBlockSelection, editor, selectedBlockIds],
+	);
 
 	useEffect(() => {
 		const rootElement = editorRootRef.current;
@@ -1150,12 +1564,72 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 
 	useEffect(() => {
 		const rootElement = editorRootRef.current;
+		if (!rootElement || selectedBlockIds.length === 0) {
+			return;
+		}
+
+		const handleCopy = (event: ClipboardEvent) => {
+			const clipboard = event.clipboardData;
+			if (!clipboard) {
+				return;
+			}
+
+			const payload = serializeSelectedBlocksForClipboard(editor, rootElement, selectedBlockIds);
+			if (!payload) {
+				return;
+			}
+
+			clipboard.setData(STACKNOTE_BLOCK_CLIPBOARD_MIME, payload.json);
+			clipboard.setData("text/html", payload.html);
+			clipboard.setData("text/plain", payload.plainText);
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		};
+
+		const handleCut = (event: ClipboardEvent) => {
+			const clipboard = event.clipboardData;
+			if (!clipboard) {
+				return;
+			}
+
+			const payload = serializeSelectedBlocksForClipboard(editor, rootElement, selectedBlockIds);
+			if (!payload) {
+				return;
+			}
+
+			clipboard.setData(STACKNOTE_BLOCK_CLIPBOARD_MIME, payload.json);
+			clipboard.setData("text/html", payload.html);
+			clipboard.setData("text/plain", payload.plainText);
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			removeSelectedBlocks();
+		};
+
+		document.addEventListener("copy", handleCopy, true);
+		document.addEventListener("cut", handleCut, true);
+		return () => {
+			document.removeEventListener("copy", handleCopy, true);
+			document.removeEventListener("cut", handleCut, true);
+		};
+	}, [editor, removeSelectedBlocks, selectedBlockIds]);
+
+	useEffect(() => {
+		const rootElement = editorRootRef.current;
 		if (!rootElement) {
 			return;
 		}
 
 		const handleKeyDown = (event: KeyboardEvent) => {
-			if ((event.key !== "Delete" && event.key !== "Backspace") || isTextInputElement(event.target)) {
+			if (event.key !== "Delete" && event.key !== "Backspace") {
+				return;
+			}
+
+			if (selectedBlockIds.length > 0) {
+				removeSelectedBlocks(event);
+				return;
+			}
+
+			if (isTextInputElement(event.target)) {
 				return;
 			}
 
@@ -1167,24 +1641,6 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 			if (!isEditorOrCanvasTarget) {
 				return;
 			}
-
-			if (selectedBlockIds.length === 0) {
-				return;
-			}
-
-			const blocksToRemove = getTopLevelSelectedBlockIds(rootElement, selectedBlockIds).filter((id) => Boolean(editor.getBlock(id)));
-			if (blocksToRemove.length === 0) {
-				clearBlockSelection();
-				return;
-			}
-
-			event.preventDefault();
-			try {
-				editor.removeBlocks(blocksToRemove);
-			} catch (err) {
-				console.error("Failed to remove selected blocks", err);
-			}
-			clearBlockSelection();
 		};
 
 		document.addEventListener("keydown", handleKeyDown, true);
@@ -1259,9 +1715,10 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 
 			blockSelectionKeyRef.current = nextSelectionKey;
 			clearBrowserTextSelection();
+			focusBlockSelection();
 			setSelectedBlockIds(blockIds);
 		},
-		[clearBrowserTextSelection],
+		[clearBrowserTextSelection, focusBlockSelection],
 	);
 
 	useEffect(() => {
@@ -1385,32 +1842,14 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 		beginBlockSelection,
 		updateBlockSelection,
 		clearBlockSelection,
-		deleteSelectedBlocks: () => {
-			if (selectedBlockIds.length === 0) {
-				return false;
-			}
-
-			const rootElement = editorRootRef.current;
-			if (!rootElement) {
-				return false;
-			}
-
-			const blocksToRemove = getTopLevelSelectedBlockIds(rootElement, selectedBlockIds).filter((id) => Boolean(editor.getBlock(id)));
-			if (blocksToRemove.length === 0) {
-				clearBlockSelection();
-				return false;
-			}
-
-			editor.removeBlocks(blocksToRemove);
-			clearBlockSelection();
-			return true;
-		},
+		deleteSelectedBlocks: () => removeSelectedBlocks(),
 	}));
 
 	return (
 		<div
 			ref={editorRootRef}
 			className="stacknote-editor-root relative mx-auto w-full flex-1"
+			tabIndex={-1}
 			data-has-block-selection={selectedBlockIds.length > 0 ? "true" : "false"}
 			onDragOver={handleDragOver}
 			onDragLeave={handleDragLeave}
@@ -1436,7 +1875,7 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 				}}
 			/>
 
-			<BlockNoteView editor={editor} theme="dark" slashMenu={false} formattingToolbar={false} data-theming-css-variables-demo>
+			<BlockNoteView editor={editor} theme="dark" slashMenu={false} emojiPicker={false} formattingToolbar={false} data-theming-css-variables-demo>
 				<FormattingToolbarController formattingToolbar={CustomFormattingToolbar} />
 				<SuggestionMenuController
 					triggerCharacter="/"
@@ -1444,6 +1883,38 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 					floatingUIOptions={slashMenuFloatingUIOptions}
 				/>
 			</BlockNoteView>
+
+			{emojiPanelOpen && (
+				<div
+					ref={emojiPanelRef}
+					className="absolute z-30 overflow-hidden rounded-[var(--sn-radius-lg)] border dropdown-enter"
+					style={{
+						left: emojiPanelPosition.left,
+						top: emojiPanelPosition.top,
+						width: `min(${EMOJI_PANEL_WIDTH}px, calc(100% - ${EMOJI_PANEL_MARGIN * 2}px))`,
+						backgroundColor: "var(--bg-hover)",
+						borderColor: "var(--border-strong)",
+						boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+					}}>
+					<div className="border-b px-3 py-2" style={{ borderColor: "var(--border-strong)" }}>
+						<div className="text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--text-tertiary)" }}>
+							Search emojis
+						</div>
+					</div>
+					<div className="p-2">
+						<EmojiPickerClient
+							onEmojiClick={handleEmojiPickerClick}
+							autoFocusSearch
+							lazyLoadEmojis
+							searchPlaceholder="Search emojis"
+							previewConfig={{ showPreview: false }}
+							width="100%"
+							height={340}
+							style={{ width: "100%", border: 0, boxShadow: "none" }}
+						/>
+					</div>
+				</div>
+			)}
 
 			{selectedBlockIds.map((blockId) => {
 				const blockElement = editorRootRef.current ? getBlockElementById(editorRootRef.current, blockId) : null;

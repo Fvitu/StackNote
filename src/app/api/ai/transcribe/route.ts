@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { groq } from "@/lib/groq"
 import { prisma } from "@/lib/prisma"
-import { ensureDbReady } from "@/lib/dbInit"
 import { checkQuotaLimit, recordQuotaUsage } from "@/lib/rate-limit"
 import { AI_LIMITS } from "@/lib/ai-limits"
 import { resolveSttModel } from "@/lib/groq-models"
@@ -28,7 +27,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  await ensureDbReady(prisma)
 
   let formData: FormData
   try {

@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
-import { ensureDbReady } from "@/lib/dbInit"
-import { getUsageStats } from "@/lib/rate-limit"
+import { getAiUsage } from "@/lib/server-data"
 
 export async function GET() {
   const session = await auth()
@@ -11,10 +9,13 @@ export async function GET() {
   }
 
   try {
-    await ensureDbReady(prisma)
-    const stats = await getUsageStats(session.user.id)
+    const stats = await getAiUsage(session.user.id)
 
-    return NextResponse.json(stats)
+    return NextResponse.json(stats, {
+      headers: {
+        "Cache-Control": "private, max-age=30",
+      },
+    })
   } catch (error) {
     console.error("Failed to load AI usage stats:", error)
     return NextResponse.json(

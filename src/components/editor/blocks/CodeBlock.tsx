@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, ChevronDown, Copy } from "lucide-react"
 import { createReactBlockSpec, BlockContentWrapper } from "@blocknote/react"
-import { detectCodeLanguage } from "@/lib/editor-paste"
+import { detectCodeLanguage } from "@/lib/code-language"
 import { SUPPORTED_LANGUAGES } from "@/lib/shiki-theme"
 import { usePreviewMode } from "@/components/editor/blocks/PreviewModeContext"
 

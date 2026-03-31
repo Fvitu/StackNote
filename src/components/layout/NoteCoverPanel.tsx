@@ -477,8 +477,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 
 			updateDraftPositionByDragDelta(touch.clientY);
 		};
-
-		const stopDragging = () => {
+	const stopDragging = () => {
 			setIsDraggingPosition(false);
 			dragStartRef.current = null;
 		};

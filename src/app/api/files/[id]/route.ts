@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { createAdminClient } from "@/lib/supabase/server"
-import { ensureDbReady } from "@/lib/dbInit"
 
 function buildContentDisposition(fileName: string) {
 	const sanitized = fileName.replace(/[\r\n"]/g, "_");
@@ -16,7 +15,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 	const { id } = await params;
 
-	await ensureDbReady(prisma);
 
 	const file = await prisma.file.findUnique({
 		where: { id },
@@ -63,7 +61,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   const { id } = await params
 
-  await ensureDbReady(prisma)
 
   const file = await prisma.file.findUnique({
     where: { id },

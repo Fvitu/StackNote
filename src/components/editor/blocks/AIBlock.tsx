@@ -242,154 +242,144 @@ export const aiBlockSpec = createReactBlockSpec(
       }
 
       return (
-        <BlockContentWrapper
-          blockType={props.block.type}
-          blockProps={props.block.props}
-          propSchema={props.editor.schema.blockSchema.aiBlock.propSchema}
-        >
-          <div
-            className="rounded-[var(--sn-radius-lg)] border"
-            style={{
-              borderColor: "rgba(124, 106, 255, 0.2)",
-              backgroundColor: "rgba(124, 106, 255, 0.06)",
-            }}
-          >
-            {/* Input area */}
-            {status === "idle" && (
-              <div className="flex items-center gap-2 p-3">
-                <Sparkles className="h-4 w-4 shrink-0" style={{ color: "var(--sn-accent)" }} />
-                <input
-                  type="text"
-                  value={localPrompt}
-                  onChange={(e) => setLocalPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault()
-                      void handleSubmit()
-                    }
-                  }}
-                  placeholder="Ask AI anything..."
-                  className="flex-1 bg-transparent text-sm focus:outline-none"
-                  style={{ color: "var(--text-primary)" }}
-                  autoFocus
-                />
-                <button
-                  onClick={() => void handleSubmit()}
-                  disabled={!localPrompt.trim()}
-                  className="flex h-7 w-7 items-center justify-center rounded-md transition-opacity disabled:opacity-40"
-                  style={{ backgroundColor: "var(--sn-accent)" }}
-                >
-                  <Send className="h-3.5 w-3.5 text-white" />
-                </button>
-              </div>
-            )}
+			<BlockContentWrapper blockType={props.block.type} blockProps={props.block.props} propSchema={props.editor.schema.blockSchema.aiBlock.propSchema}>
+				<div
+					className="rounded-[var(--sn-radius-lg)] border"
+					style={{
+						borderColor: "rgba(124, 106, 255, 0.2)",
+						backgroundColor: "rgba(124, 106, 255, 0.06)",
+					}}>
+					{/* Input area */}
+					{status === "idle" && (
+						<div className="flex items-center gap-2 p-3">
+							<Sparkles className="h-4 w-4 shrink-0" style={{ color: "var(--sn-accent)" }} />
+							<input
+								type="text"
+								value={localPrompt}
+								onChange={(e) => setLocalPrompt(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" && !e.shiftKey) {
+										e.preventDefault();
+										void handleSubmit();
+									}
+								}}
+								placeholder="Ask AI anything..."
+								className="flex-1 bg-transparent text-sm focus:outline-none"
+								style={{ color: "var(--text-primary)" }}
+								autoFocus
+							/>
+							<button
+								onClick={() => void handleSubmit()}
+								disabled={!localPrompt.trim()}
+								className="flex h-7 w-7 items-center justify-center rounded-md transition-opacity disabled:opacity-40"
+								style={{ backgroundColor: "var(--sn-accent)" }}>
+								<Send className="h-3.5 w-3.5 text-white" />
+							</button>
+						</div>
+					)}
 
-            {/* Generating state */}
-            {(status === "generating" || isGenerating) && (
-              <>
-                <div className="flex items-center gap-2 border-b p-3" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
-                  <Sparkles className="h-4 w-4" style={{ color: "var(--sn-accent)" }} />
-                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                    {props.block.props.prompt || localPrompt}
-                  </span>
-                </div>
-                <div className="p-3">
-                  {props.block.props.response ? (
-                    <div className="text-sm" style={{ color: "var(--text-primary)" }}>
-                      <AssistantContent content={props.block.props.response} isStreaming />
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--sn-accent)" }} />
-                      <span className="text-sm" style={{ color: "var(--text-tertiary)" }}>
-                        Generating...
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
+					{/* Generating state */}
+					{(status === "generating" || isGenerating) && (
+						<>
+							<div className="flex items-center gap-2 border-b p-3" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
+								<Sparkles className="h-4 w-4" style={{ color: "var(--sn-accent)" }} />
+								<span className="text-sm" style={{ color: "var(--text-secondary)" }}>
+									{props.block.props.prompt || localPrompt}
+								</span>
+							</div>
+							<div className="p-3">
+								{props.block.props.response ? (
+									<div className="text-sm" style={{ color: "var(--text-primary)" }}>
+										<AssistantContent content={props.block.props.response} isStreaming />
+									</div>
+								) : (
+									<div className="flex items-center gap-2">
+										<Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--sn-accent)" }} />
+										<span className="text-sm" style={{ color: "var(--text-tertiary)" }}>
+											Generating...
+										</span>
+									</div>
+								)}
+							</div>
+						</>
+					)}
 
-            {/* Done state */}
-            {status === "done" && props.block.props.response && (
-              <>
-                <div className="flex items-center gap-2 border-b p-3" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
-                  <Sparkles className="h-4 w-4" style={{ color: "var(--sn-accent)" }} />
-                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                    {props.block.props.prompt}
-                  </span>
-                </div>
-                <div className="p-3 text-sm" style={{ color: "var(--text-primary)" }}>
-                  <AssistantContent content={props.block.props.response} />
-                </div>
-                <div className="flex flex-wrap items-center gap-2 border-t p-2" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
-                  <AssistantResponseActions
-                    content={stripAssistantReasoning(props.block.props.response).trim()}
-                    onAppendToNote={handleAppendToEnd}
-                  />
-                  <button
-                    onClick={handleInsert}
-                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-[#1a1a1a]"
-                    style={{ color: "var(--sn-accent)" }}
-                  >
-                    <Plus className="h-3 w-3" />
-                    Insert into note
-                  </button>
-                  <button
-                    onClick={handleRetry}
-                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-[#1a1a1a]"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    Retry
-                  </button>
-                  <button
-                    onClick={handleDelete}
-                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-[#1a1a1a]"
-                    style={{ color: "var(--text-tertiary)" }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    Delete
-                  </button>
-                </div>
-              </>
-            )}
+					{/* Done state */}
+					{status === "done" && props.block.props.response && (
+						<>
+							<div className="flex items-center gap-2 border-b p-3" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
+								<Sparkles className="h-4 w-4" style={{ color: "var(--sn-accent)" }} />
+								<span className="text-sm" style={{ color: "var(--text-secondary)" }}>
+									{props.block.props.prompt}
+								</span>
+							</div>
+							<div className="p-3 text-sm" style={{ color: "var(--text-primary)" }}>
+								<AssistantContent content={props.block.props.response} />
+							</div>
+							<div className="flex flex-wrap items-center gap-2 border-t p-2" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
+								<AssistantResponseActions
+									content={stripAssistantReasoning(props.block.props.response).trim()}
+									onAppendToNote={handleAppendToEnd}
+									showAppendButton={false}
+								/>
+								<button
+									onClick={handleInsert}
+									className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--sn-accent)] transition-colors hover:bg-[#1a1a1a]"
+									style={{ color: "var(--sn-accent)" }}>
+									<Plus className="h-3 w-3" />
+									Insert into note
+								</button>
+								<button
+									onClick={handleRetry}
+									className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-[#1a1a1a]"
+									style={{ color: "var(--text-secondary)" }}>
+									<RotateCcw className="h-3 w-3" />
+									Retry
+								</button>
+								<button
+									onClick={handleDelete}
+									className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/10"
+									style={{ color: "var(--destructive)" }}>
+									<Trash2 className="h-3 w-3" />
+									Delete
+								</button>
+							</div>
+						</>
+					)}
 
-            {/* Error state */}
-            {status === "error" && (
-              <>
-                <div className="flex items-center gap-2 border-b p-3" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
-                  <Sparkles className="h-4 w-4" style={{ color: "var(--sn-accent)" }} />
-                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                    {props.block.props.prompt}
-                  </span>
-                </div>
-                <div className="p-3 text-sm" style={{ color: "#ef4444" }}>
-                  {props.block.props.error || "Something went wrong"}
-                </div>
-                <div className="flex items-center gap-2 border-t p-2" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
-                  <button
-                    onClick={handleRetry}
-                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-[#1a1a1a]"
-                    style={{ color: "var(--sn-accent)" }}
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    Retry
-                  </button>
-                  <button
-                    onClick={handleDelete}
-                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-[#1a1a1a]"
-                    style={{ color: "var(--text-tertiary)" }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    Delete
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </BlockContentWrapper>
-      )
+					{/* Error state */}
+					{status === "error" && (
+						<>
+							<div className="flex items-center gap-2 border-b p-3" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
+								<Sparkles className="h-4 w-4" style={{ color: "var(--sn-accent)" }} />
+								<span className="text-sm" style={{ color: "var(--text-secondary)" }}>
+									{props.block.props.prompt}
+								</span>
+							</div>
+							<div className="p-3 text-sm" style={{ color: "#ef4444" }}>
+								{props.block.props.error || "Something went wrong"}
+							</div>
+							<div className="flex items-center gap-2 border-t p-2" style={{ borderColor: "rgba(124, 106, 255, 0.2)" }}>
+								<button
+									onClick={handleRetry}
+									className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-[#1a1a1a]"
+									style={{ color: "var(--sn-accent)" }}>
+									<RotateCcw className="h-3 w-3" />
+									Retry
+								</button>
+								<button
+									onClick={handleDelete}
+									className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/10"
+									style={{ color: "var(--destructive)" }}>
+									<Trash2 className="h-3 w-3" />
+									Delete
+								</button>
+							</div>
+						</>
+					)}
+				</div>
+			</BlockContentWrapper>
+		);
     },
   }
 )

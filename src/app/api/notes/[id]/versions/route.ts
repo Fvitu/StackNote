@@ -1,29 +1,29 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
-import { ensureDbReady } from "@/lib/dbInit"
 import { prisma } from "@/lib/prisma"
 import { NOTE_VERSION_LIMIT } from "@/lib/note-versioning"
 import { autosaveNoteContent, createNoteVersion } from "@/lib/note-server"
 
 async function getAuthorizedNote(noteId: string, userId: string) {
-  await ensureDbReady(prisma)
-
-  const note = await prisma.note.findUnique({
-    where: { id: noteId },
-    include: {
+  const note = await prisma.note.findFirst({
+    where: {
+      id: noteId,
       workspace: {
-        select: {
-          userId: true,
-        },
+        userId,
       },
+    },
+    select: {
+      id: true,
+      title: true,
+      content: true,
+      updatedAt: true,
+      emoji: true,
+      coverImage: true,
+      coverImageMeta: true,
     },
   })
 
   if (!note) {
-    return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) }
-  }
-
-  if (note.workspace.userId !== userId) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
 

@@ -174,13 +174,23 @@
   contain: layout style;
 }
 
+.stacknote-editor-shell,
+.stacknote-editor-root,
+.stacknote-editor-root:focus,
+.stacknote-editor-root:focus-visible,
+.stacknote-editor-shell:focus-within {
+  outline: none;
+  box-shadow: none;
+}
+
 .stacknote-editor-root .bn-editor .ProseMirror>* {
   content-visibility: auto;
   contain-intrinsic-size: 0 44px;
 }
 
 .stacknote-editor-root .bn-block-content.ProseMirror-selectednode>*,
-.stacknote-editor-root .ProseMirror-selectednode>.bn-block-content>* {  border-radius: 8px;
+.stacknote-editor-root .ProseMirror-selectednode>.bn-block-content>* {
+  border-radius: 8px;
   outline: 2px solid rgba(124, 106, 255, 0.7);
   background: rgba(124, 106, 255, 0.08);
 }
@@ -765,6 +775,32 @@ textarea::selection {
   color: var(--text-primary);
 }
 
+/* Keep display equations from pushing layouts wider than the viewport. */
+.katex-wrapper .katex-display,
+.stacknote-ai-markdown .katex-display {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Preserve KaTeX intrinsic width so users can horizontally swipe long formulas. */
+.katex-wrapper .katex-display>.katex,
+.stacknote-ai-markdown .katex-display>.katex {
+  display: inline-block;
+  min-width: max-content;
+  padding: 0 0.1rem;
+}
+
+@media (max-width: 640px) {
+
+  .katex-wrapper .katex-display,
+  .stacknote-ai-markdown .katex-display {
+    max-width: min(100%, calc(100dvw - 3rem));
+  }
+}
+
 .stacknote-inline-equation {
   margin: 0 0.12em;
   padding: 0.05em 0.28em;
@@ -803,5 +839,26 @@ mark {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+.stacknote-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #111111;
+}
+
+.stacknote-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.05) 45%, rgba(255, 255, 255, 0.12) 50%, rgba(255, 255, 255, 0.05) 55%, transparent 100%);
+  animation: stacknote-skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes stacknote-skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
   }
 }

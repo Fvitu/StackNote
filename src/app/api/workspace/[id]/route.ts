@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { invalidateCurrentWorkspace } from "@/lib/server-data";
 
 export async function PATCH(
 	request: NextRequest,
@@ -40,6 +41,8 @@ export async function PATCH(
 				name: true,
 			},
 		});
+
+		await invalidateCurrentWorkspace(session.user.id);
 
 		return NextResponse.json(updatedWorkspace);
 	} catch (error) {

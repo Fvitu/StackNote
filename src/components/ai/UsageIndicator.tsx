@@ -31,15 +31,16 @@ interface UsageStats {
 }
 
 interface UsageIndicatorProps {
-  model: string
-  category?: "text" | "flashcard" | "voice"
-  variant?: "compact" | "detailed"
+	model: string;
+	category?: "text" | "flashcard" | "voice";
+	variant?: "compact" | "detailed" | "mobile";
 }
 
 export function UsageIndicator({ model, category = "text", variant = "compact" }: UsageIndicatorProps) {
   const [stats, setStats] = useState<UsageStats | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [now, setNow] = useState(() => Date.now())
+  const progressColor = category === "flashcard" ? "var(--text-secondary)" : "var(--sn-accent)";
 
   useEffect(() => {
     async function fetchUsage() {
@@ -151,89 +152,86 @@ export function UsageIndicator({ model, category = "text", variant = "compact" }
 
   if (variant === "detailed") {
     return (
-      <div
-        className="rounded-2xl border px-4 py-3"
-        style={{
-          borderColor: "rgba(255,255,255,0.08)",
-          backgroundColor: "rgba(255,255,255,0.02)",
-        }}
-        title={title}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em]" style={{ color: "var(--text-tertiary)" }}>
-              Quota
-            </p>
-            <p className="mt-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-              {modelUsage.label}
-            </p>
-          </div>
-          {countdown ? (
-            <span
-              className="shrink-0 rounded-full border px-2 py-1 text-[11px]"
-              style={{
-                borderColor: "rgba(255,255,255,0.08)",
-                color: "var(--text-secondary)",
-                backgroundColor: "rgba(255,255,255,0.03)",
-              }}
-            >
-              {countdown}
-            </span>
-          ) : null}
-        </div>
+		<div
+			className="rounded-2xl border px-4 py-3"
+			style={{
+				borderColor: "rgba(255,255,255,0.08)",
+				backgroundColor: "rgba(255,255,255,0.02)",
+			}}
+			title={title}>
+			<div className="flex items-start justify-between gap-3">
+				<div className="min-w-0">
+					<p className="text-[11px] font-medium uppercase tracking-[0.18em]" style={{ color: "var(--text-tertiary)" }}>
+						Quota
+					</p>
+					<p className="mt-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+						{modelUsage.label}
+					</p>
+				</div>
+				{countdown ? (
+					<span
+						className="shrink-0 rounded-full border px-2 py-1 text-[11px]"
+						style={{
+							borderColor: "rgba(255,255,255,0.08)",
+							color: "var(--text-secondary)",
+							backgroundColor: "rgba(255,255,255,0.03)",
+						}}>
+						{countdown}
+					</span>
+				) : null}
+			</div>
 
-        <div className="mt-3 flex items-center gap-3">
-          <div
-            className="h-2 flex-1 overflow-hidden rounded-full"
-            style={{ backgroundColor: "var(--bg-hover)" }}
-          >
-            <div
-              className="h-full transition-all"
-              style={{
-                width: `${Math.min(percentage * 100, 100)}%`,
-                backgroundColor: isNearLimit ? "#ef4444" : "var(--sn-accent)",
-              }}
-            />
-          </div>
-          <span className="text-sm font-semibold" style={{ color: isNearLimit ? "#f87171" : "var(--text-primary)" }}>
-            {modelUsage.requests.remaining}
-          </span>
-          <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-            requests left
-          </span>
-        </div>
+			<div className="mt-3 flex items-center gap-3">
+				<div className="h-2 flex-1 overflow-hidden rounded-full" style={{ backgroundColor: "var(--bg-hover)" }}>
+					<div
+						className="h-full transition-all"
+						style={{
+							width: `${Math.min(percentage * 100, 100)}%`,
+							backgroundColor: isNearLimit ? "#ef4444" : progressColor,
+						}}
+					/>
+				</div>
+				<span className="text-sm font-semibold" style={{ color: isNearLimit ? "#f87171" : "var(--text-primary)" }}>
+					{modelUsage.requests.remaining}
+				</span>
+				<span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+					requests left
+				</span>
+			</div>
 
-        {secondaryMetric && secondaryLabel && secondaryRemaining ? (
-          <p className="mt-2 text-xs" style={{ color: "var(--text-secondary)" }}>
-            {secondaryRemaining} {secondaryLabel} available in this 24-hour window
-          </p>
-        ) : null}
-      </div>
-    )
+			{secondaryMetric && secondaryLabel && secondaryRemaining ? (
+				<p className="mt-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+					{secondaryRemaining} {secondaryLabel} available in this 24-hour window
+				</p>
+			) : null}
+		</div>
+	);
+  }
+
+  if (variant === "mobile") {
+		return (
+			<div className="flex flex-col items-center text-center text-xs" style={{ color: isNearLimit ? "#ef4444" : "var(--text-tertiary)" }} title={title}>
+				<span className="font-medium text-[var(--text-secondary)]">{modelUsage.requests.remaining} requests remaining</span>
+				{countdown ? <span className="text-[11px]">Resets in {countdown}</span> : null}
+			</div>
+		);
   }
 
   return (
-    <div
-      className="flex items-center gap-1.5 text-xs"
-      style={{ color: isNearLimit ? "#ef4444" : "var(--text-tertiary)" }}
-      title={title}
-    >
-      <div
-        className="h-1.5 w-12 overflow-hidden rounded-full"
-        style={{ backgroundColor: "var(--bg-hover)" }}
-      >
-        <div
-          className="h-full transition-all"
-          style={{
-            width: `${Math.min(percentage * 100, 100)}%`,
-            backgroundColor: isNearLimit ? "#ef4444" : "var(--sn-accent)",
-          }}
-        />
-      </div>
-      <span>
-        {modelUsage.requests.used}/{modelUsage.requests.limit}
-      </span>
-      {countdown ? <span>{countdown}</span> : null}
-    </div>
-  )
+		<div className="flex items-center gap-1.5 text-xs" style={{ color: isNearLimit ? "#ef4444" : "var(--text-tertiary)" }} title={title}>
+			<div className="h-1.5 w-12 overflow-hidden rounded-full" style={{ backgroundColor: "var(--bg-hover)" }}>
+				<div
+					className="h-full transition-all"
+					style={{
+						width: `${Math.min(percentage * 100, 100)}%`,
+						backgroundColor: isNearLimit ? "#ef4444" : progressColor,
+					}}
+				/>
+			</div>
+			<span>
+				{modelUsage.requests.used}/{modelUsage.requests.limit}
+			</span>
+			{countdown ? <span>{countdown}</span> : null}
+		</div>
+  );
 }

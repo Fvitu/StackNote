@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { nanoid } from "nanoid"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { ensureDbReady } from "@/lib/dbInit"
 import { createAdminClient } from "@/lib/supabase/server"
 import { getFileExtension, isMediaType } from "@/lib/media"
 
@@ -81,7 +80,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: signedError?.message ?? "Failed to create signed URL" }, { status: 500 })
   }
 
-  await ensureDbReady(prisma)
 
   const saved = await prisma.file.create({
     data: {

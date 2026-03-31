@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
-import { ensureDbReady } from "@/lib/dbInit";
-import { updateNoteSearchVector } from "@/lib/note-server";
+import { invalidateWorkspaceTree } from "@/lib/server-data";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
 	const session = await auth();
@@ -11,20 +10,39 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 	}
 
-	await ensureDbReady(prisma);
-
 	const { id } = await params;
 
-	const note = await prisma.note.findUnique({
-		where: { id },
-		include: { workspace: { select: { userId: true, name: true } }, folder: { select: { name: true } } },
+	const note = await prisma.note.findFirst({
+		where: {
+			id,
+			workspace: {
+				userId: session.user.id,
+			},
+		},
+		select: {
+			id: true,
+			title: true,
+			emoji: true,
+			folderId: true,
+			coverImage: true,
+			coverImageMeta: true,
+			content: true,
+			createdAt: true,
+			updatedAt: true,
+			workspace: {
+				select: {
+					name: true,
+				},
+			},
+			folder: {
+				select: {
+					name: true,
+				},
+			},
+		},
 	});
 
 	if (!note) {
-		return NextResponse.json({ error: "Not found" }, { status: 404 });
-	}
-
-	if (note.workspace.userId !== session.user.id) {
 		return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 	}
 
@@ -37,23 +55,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 	}
 
-	await ensureDbReady(prisma);
-
 	const { id } = await params;
 	const body = await req.json();
 	const { title, folderId, emoji } = body;
 	const content = body.content !== undefined ? normalizeBlockNoteContent(body.content) : undefined;
 
-	const note = await prisma.note.findUnique({
-		where: { id },
-		include: { workspace: { select: { userId: true } } },
+	const note = await prisma.note.findFirst({
+		where: {
+			id,
+			workspace: {
+				userId: session.user.id,
+			},
+		},
+		select: {
+			id: true,
+			workspaceId: true,
+		},
 	});
 
 	if (!note) {
-		return NextResponse.json({ error: "Not found" }, { status: 404 });
-	}
-
-	if (note.workspace.userId !== session.user.id) {
 		return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 	}
 
@@ -63,20 +83,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 	if (folderId !== undefined) data.folderId = folderId;
 	if (emoji !== undefined) data.emoji = emoji;
 
-	await ensureDbReady(prisma);
-
 	const updated = await prisma.$transaction(async (tx) => {
-		const updatedNote = await tx.note.update({
+		return tx.note.update({
 			where: { id },
 			data,
 		});
-
-		if (title !== undefined || content !== undefined) {
-			await updateNoteSearchVector(tx, id);
-		}
-
-		return updatedNote;
 	});
+
+	if (title !== undefined || folderId !== undefined || emoji !== undefined) {
+		await invalidateWorkspaceTree(session.user.id, note.workspaceId);
+	}
 
 	return NextResponse.json(updated);
 }
@@ -87,25 +103,26 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 	}
 
-	await ensureDbReady(prisma);
-
 	const { id } = await params;
 
-	const note = await prisma.note.findUnique({
-		where: { id },
-		include: { workspace: { select: { userId: true } } },
+	const note = await prisma.note.findFirst({
+		where: {
+			id,
+			workspace: {
+				userId: session.user.id,
+			},
+		},
+		select: {
+			id: true,
+			workspaceId: true,
+		},
 	});
 
 	if (!note) {
-		return NextResponse.json({ error: "Not found" }, { status: 404 });
-	}
-
-	if (note.workspace.userId !== session.user.id) {
 		return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 	}
 
 	// Delete associated files from storage then remove DB records and archive note in a single DB transaction
-	await ensureDbReady(prisma);
 	const files = await prisma.file.findMany({ where: { noteId: id } });
 
 	const supabase = (await import("@/lib/supabase/server")).createAdminClient();
@@ -126,6 +143,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 		console.error("DB cleanup/archival failed:", err);
 		return NextResponse.json({ error: "Failed to delete associated files" }, { status: 500 });
 	}
+
+	await invalidateWorkspaceTree(session.user.id, note.workspaceId);
 
 	return NextResponse.json({ success: true });
 }

@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { StackNoteLogo } from "@/components/branding/StackNoteLogo";
 
 export default function VerifyPage() {
 	return (
@@ -18,7 +18,7 @@ export default function VerifyPage() {
 				<div
 					className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border"
 					style={{ borderColor: "var(--border-strong)", backgroundColor: "#0b0b0b" }}>
-					<Image src="/StackNote.png" alt="StackNote logo" width={38} height={38} priority className="h-9 w-9 rounded-md" />
+					<StackNoteLogo className="h-9 w-9 rounded-md" />
 				</div>
 				<h2 className="mb-2 text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
 					Check your email

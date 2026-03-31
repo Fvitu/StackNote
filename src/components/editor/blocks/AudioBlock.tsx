@@ -76,6 +76,7 @@ export const audioMediaBlockSpec = createReactBlockSpec(
       const [isTranscribing, setIsTranscribing] = useState(false)
       const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
       const [sttModel, setSttModel] = useState(DEFAULT_STT_MODEL)
+      const lastNonZeroVolumeRef = useRef(0.8);
       const isPreview = usePreviewMode()
       const transcriptBlockIds = parseTranscriptBlockIds(props.block.props.transcriptBlockIds)
       const hasTranscript = transcriptBlockIds.length > 0
@@ -268,99 +269,174 @@ export const audioMediaBlockSpec = createReactBlockSpec(
       }
 
       return (
-        <BlockContentWrapper
-          blockType={props.block.type}
-          blockProps={props.block.props}
-          propSchema={props.editor.schema.blockSchema.audioMedia.propSchema}
-        >
-          <div
-            className="group flex w-full items-center gap-3 rounded-[var(--sn-radius-lg)] border px-3 py-3"
-            style={{ borderColor: "var(--border-default)", backgroundColor: "var(--bg-surface)" }}
-            onMouseEnter={() => setShowVolume(true)}
-            onMouseLeave={() => setShowVolume(false)}
-          >
-            <audio ref={audioRef} src={props.block.props.url} preload="metadata" />
+			<BlockContentWrapper blockType={props.block.type} blockProps={props.block.props} propSchema={props.editor.schema.blockSchema.audioMedia.propSchema}>
+				<div
+					className="group flex w-full flex-col gap-3 rounded-[var(--sn-radius-lg)] border px-3 py-3"
+					style={{ borderColor: "var(--border-default)", backgroundColor: "var(--bg-surface)" }}
+					onMouseEnter={() => setShowVolume(true)}
+					onMouseLeave={() => setShowVolume(false)}>
+					<audio ref={audioRef} src={props.block.props.url} preload="metadata" />
 
-            <button
-              type="button"
-              onClick={togglePlayback}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-              style={{ backgroundColor: "var(--sn-accent)", color: "#ffffff" }}
-            >
-              {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            </button>
+					<div className="flex min-w-0 items-center gap-3 md:hidden">
+						<button
+							type="button"
+							onClick={togglePlayback}
+							className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+							style={{ backgroundColor: "var(--sn-accent)", color: "#ffffff" }}>
+							{isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+						</button>
 
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 truncate text-xs" style={{ color: "var(--text-secondary)" }}>
-                {props.block.props.filename || "Audio"}
-              </div>
-              <div className="relative h-1.5 w-full rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
-                <div className="absolute left-0 top-0 h-full rounded-full" style={{ width: `${progress}%`, backgroundColor: "var(--sn-accent)" }} />
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 0}
-                  value={Math.min(currentTime, duration || 0)}
-                  onChange={(event) => {
-                    const next = Number(event.target.value)
-                    setCurrentTime(next)
-                    if (audioRef.current) audioRef.current.currentTime = next
-                  }}
-                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                />
-              </div>
-            </div>
+						<div className="min-w-0 flex-1">
+							<div className="truncate text-xs leading-4 text-[var(--text-secondary)]">{props.block.props.filename || "Audio"}</div>
+						</div>
+					</div>
 
-            <div className="w-20 shrink-0 text-right text-xs" style={{ color: "var(--text-secondary)" }}>
-              {formatSeconds(currentTime)} / {formatSeconds(duration)}
-            </div>
+					<div className="relative h-1.5 w-full rounded-full md:hidden" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
+						<div className="absolute left-0 top-0 h-full rounded-full" style={{ width: `${progress}%`, backgroundColor: "var(--sn-accent)" }} />
+						<input
+							type="range"
+							min={0}
+							max={duration || 0}
+							value={Math.min(currentTime, duration || 0)}
+							onChange={(event) => {
+								const next = Number(event.target.value);
+								setCurrentTime(next);
+								if (audioRef.current) audioRef.current.currentTime = next;
+							}}
+							className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 touch-none"
+						/>
+					</div>
 
-            <div className={`flex items-center gap-2 overflow-hidden transition-all duration-150 ${showVolume ? "w-24 opacity-100" : "w-0 opacity-0"}`}>
-              {volume === 0 ? <VolumeX className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} /> : <Volume2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />}
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={volume}
-                onChange={(event) => {
-                  const next = Number(event.target.value)
-                  setVolume(next)
-                  if (audioRef.current) audioRef.current.volume = next
-                }}
-                className="h-1.5 w-16 cursor-pointer appearance-none rounded-full"
-                style={{
-                  background: `linear-gradient(to right, var(--sn-accent) ${Math.round(volume * 100)}%, rgba(255,255,255,0.08) ${Math.round(volume * 100)}%)`,
-                }}
-              />
-            </div>
+					<div className="flex flex-col items-center gap-2 text-center md:hidden">
+						<div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+							{formatSeconds(currentTime)} / {formatSeconds(duration)}
+						</div>
+						<UsageIndicator model={sttModel} category="voice" variant="mobile" />
+						<div className="flex items-center justify-center gap-2">
+							<button
+								type="button"
+								onClick={handleTranscribe}
+								disabled={isTranscribing || !props.block.props.url}
+								className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[#1a1a1a] disabled:opacity-50"
+								style={{ color: transcriptionError ? "#ef4444" : "var(--text-tertiary)" }}
+								title={transcriptionError || (hasTranscript ? "Reapply transcription" : "Transcribe audio with AI")}>
+								{isTranscribing ? (
+									<>
+										<Loader2 className="h-3 w-3 animate-spin" />
+										<span>Transcribing...</span>
+									</>
+								) : (
+									<>
+										<Sparkles className="h-3 w-3" />
+										<span>{hasTranscript ? "Re-transcribe" : "Transcribe"}</span>
+									</>
+								)}
+							</button>
+							<button
+								type="button"
+								onClick={() => {
+									const nextVolume = volume > 0 ? 0 : lastNonZeroVolumeRef.current || 0.8;
+									setVolume(nextVolume);
+									if (audioRef.current) audioRef.current.volume = nextVolume;
+								}}
+								className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[#1a1a1a]"
+								style={{ color: "var(--text-tertiary)" }}
+								title={volume > 0 ? "Mute audio" : "Unmute audio"}>
+								{volume > 0 ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3" />}
+								<span>{volume > 0 ? "Mute" : "Unmute"}</span>
+							</button>
+						</div>
+					</div>
 
-            <div className="flex shrink-0 flex-col items-end gap-1">
-              <button
-                type="button"
-                onClick={handleTranscribe}
-                disabled={isTranscribing || !props.block.props.url}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[#1a1a1a] disabled:opacity-50"
-                style={{ color: transcriptionError ? "#ef4444" : "var(--text-tertiary)" }}
-                title={transcriptionError || (hasTranscript ? "Reapply transcription" : "Transcribe audio with AI")}
-              >
-                {isTranscribing ? (
-                  <>
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span>Transcribing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-3 w-3" />
-                    <span>{hasTranscript ? "Re-transcribe" : "Transcribe"}</span>
-                  </>
-                )}
-              </button>
-              <UsageIndicator model={sttModel} category="voice" />
-            </div>
-          </div>
-        </BlockContentWrapper>
-      )
+					<div className="hidden min-w-0 items-center gap-3 md:flex">
+						<button
+							type="button"
+							onClick={togglePlayback}
+							className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+							style={{ backgroundColor: "var(--sn-accent)", color: "#ffffff" }}>
+							{isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+						</button>
+
+						<div className="min-w-0 flex-1">
+							<div className="truncate text-xs leading-4 text-[var(--text-secondary)]">{props.block.props.filename || "Audio"}</div>
+							<div className="relative mt-1 h-1.5 w-full rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
+								<div
+									className="absolute left-0 top-0 h-full rounded-full"
+									style={{ width: `${progress}%`, backgroundColor: "var(--sn-accent)" }}
+								/>
+								<input
+									type="range"
+									min={0}
+									max={duration || 0}
+									value={Math.min(currentTime, duration || 0)}
+									onChange={(event) => {
+										const next = Number(event.target.value);
+										setCurrentTime(next);
+										if (audioRef.current) audioRef.current.currentTime = next;
+									}}
+									className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+								/>
+							</div>
+						</div>
+
+						<div className="w-20 shrink-0 whitespace-nowrap text-right text-xs" style={{ color: "var(--text-secondary)" }}>
+							{formatSeconds(currentTime)} / {formatSeconds(duration)}
+						</div>
+
+						<div
+							className={`hidden items-center gap-2 overflow-hidden transition-all duration-150 md:flex ${showVolume ? "w-24 opacity-100" : "w-0 opacity-0"}`}>
+							{volume === 0 ? (
+								<VolumeX className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+							) : (
+								<Volume2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+							)}
+							<input
+								type="range"
+								min={0}
+								max={1}
+								step={0.01}
+								value={volume}
+								onChange={(event) => {
+									const next = Number(event.target.value);
+									setVolume(next);
+									if (next > 0) {
+										lastNonZeroVolumeRef.current = next;
+									}
+									if (audioRef.current) audioRef.current.volume = next;
+								}}
+								className="h-1.5 w-16 cursor-pointer appearance-none rounded-full"
+								style={{
+									background: `linear-gradient(to right, var(--sn-accent) ${Math.round(volume * 100)}%, rgba(255,255,255,0.08) ${Math.round(volume * 100)}%)`,
+								}}
+							/>
+						</div>
+
+						<div className="flex shrink-0 flex-col items-end gap-1">
+							<button
+								type="button"
+								onClick={handleTranscribe}
+								disabled={isTranscribing || !props.block.props.url}
+								className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[#1a1a1a] disabled:opacity-50"
+								style={{ color: transcriptionError ? "#ef4444" : "var(--text-tertiary)" }}
+								title={transcriptionError || (hasTranscript ? "Reapply transcription" : "Transcribe audio with AI")}>
+								{isTranscribing ? (
+									<>
+										<Loader2 className="h-3 w-3 animate-spin" />
+										<span>Transcribing...</span>
+									</>
+								) : (
+									<>
+										<Sparkles className="h-3 w-3" />
+										<span>{hasTranscript ? "Re-transcribe" : "Transcribe"}</span>
+									</>
+								)}
+							</button>
+							<UsageIndicator model={sttModel} category="voice" />
+						</div>
+					</div>
+				</div>
+			</BlockContentWrapper>
+		);
     },
   },
 )

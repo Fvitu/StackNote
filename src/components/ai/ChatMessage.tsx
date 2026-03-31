@@ -49,12 +49,12 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onA
 
 			{/* Message body */}
 			{hasFlashcardDeck ? (
-				<div className="max-w-[95%] flex-1">
+				<div className="min-w-0 max-w-[95%] flex-1">
 					<FlashcardChatMessage deck={message.flashcardDeck!} />
 				</div>
 			) : (
 				<div
-					className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${isUser ? "rounded-br-sm" : "rounded-bl-sm"}`}
+					className={`min-w-0 max-w-[85%] rounded-lg px-3 py-2 text-sm ${isUser ? "rounded-br-sm" : "rounded-bl-sm"}`}
 					style={{
 						backgroundColor: isUser ? "var(--bg-active)" : "var(--bg-surface)",
 						color: "var(--text-primary)",
@@ -62,7 +62,7 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onA
 					{isUser ? (
 						<p className="whitespace-pre-wrap">{message.content}</p>
 					) : (
-						<div className="ai-message-content">
+						<div className="ai-message-content min-w-0">
 							{message.content ? (
 								<>
 									<AssistantContent content={visibleAssistantContent} isStreaming={isStreaming} />
@@ -70,24 +70,33 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onA
 										<AssistantResponseActions content={finalAssistantContent} onAppendToNote={onAppendToNote} className="mt-3" />
 									) : null}
 									{!isStreaming && (
-										<div className="mt-1 text-[11px] text-center" style={{ color: "var(--text-tertiary)", opacity: 0.55 }}>
+										<div
+											className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-[11px] text-center"
+											style={{ color: "var(--text-tertiary)", opacity: 0.55 }}>
 											{(() => {
 												const modelDisplay = message.model
 													? (TEXT_MODELS.find((m) => m.id === message.model)?.name ?? message.model)
 													: null;
 												const ts = message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp);
 												const usage = parsedAssistantContent?.usage ?? message.usage ?? null;
-												return (
-													<>
-														{ts.toLocaleString()}
-														<br />
-														Answered by {modelDisplay ?? "AI model"}
-														<br />
-														{usage
-															? `Tokens ↑: ${usage.inputTokens.toLocaleString()} · ↓: ${usage.outputTokens.toLocaleString()}`
-															: ""}
-													</>
-												);
+												const footerItems = [
+													ts.toLocaleString(),
+													`Answered by ${modelDisplay ?? "AI model"}`,
+													usage
+														? `Tokens ↑: ${usage.inputTokens.toLocaleString()} · ↓: ${usage.outputTokens.toLocaleString()}`
+														: null,
+												].filter((item): item is string => Boolean(item));
+
+												return footerItems.map((item, index) => (
+													<div key={`${item}-${index}`} className="flex min-w-0 items-center gap-1.5 whitespace-normal">
+														{index > 0 ? (
+															<span aria-hidden="true" className="shrink-0">
+																•
+															</span>
+														) : null}
+														<span className="min-w-0">{item}</span>
+													</div>
+												));
 											})()}
 										</div>
 									)}

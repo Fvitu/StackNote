@@ -1,39 +1,39 @@
-"use client"
+"use client";
 
-import { useMemo, useRef } from "react"
-import { format, formatDistanceToNowStrict, isToday, isYesterday } from "date-fns"
-import { Eye, History, RotateCcw } from "lucide-react"
-import { useCreateBlockNote } from "@blocknote/react"
-import { BlockNoteView } from "@blocknote/mantine"
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from "@blocknote/core"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { customBlockSpecs } from "@/components/editor/blocks"
-import { customInlineContentSpecs } from "@/components/editor/inline"
-import { PreviewModeProvider } from "@/components/editor/blocks/PreviewModeContext"
-import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize"
-import { resolveNoteCoverMeta } from "@/lib/note-cover"
-import type { NoteVersionDetail, NoteVersionSummary } from "@/lib/note-versioning"
-import "@blocknote/mantine/style.css"
+import { useEffect, useMemo, useRef, useState } from "react";
+import { format, formatDistanceToNowStrict, isToday, isYesterday } from "date-fns";
+import { Eye, History, RotateCcw } from "lucide-react";
+import { useCreateBlockNote } from "@blocknote/react";
+import { BlockNoteView } from "@blocknote/mantine";
+import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from "@blocknote/core";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { customBlockSpecs } from "@/components/editor/blocks";
+import { customInlineContentSpecs } from "@/components/editor/inline";
+import { PreviewModeProvider } from "@/components/editor/blocks/PreviewModeContext";
+import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
+import { resolveNoteCoverMeta } from "@/lib/note-cover";
+import type { NoteVersionDetail, NoteVersionSummary } from "@/lib/note-versioning";
+import "@blocknote/mantine/style.css";
 
 interface NoteVersionsDialogProps {
-  open: boolean
-  currentContent: unknown
-  currentTitle: string
-  currentEmoji: string | null
-  currentCoverImage: string | null
-  currentCoverImageMeta: unknown
-  currentVersionId: string | null
-  versions: NoteVersionSummary[]
-  loading: boolean
-  previewVersionId: string | null
-  previewVersion: NoteVersionDetail | null
-  previewLoading: boolean
-  restoringVersionId: string | null
-  onClose: () => void
-  onRefresh: () => void
-  onPreview: (versionId: string) => Promise<void>
-  onRestore: (versionId: string) => Promise<void>
+	open: boolean;
+	currentContent: unknown;
+	currentTitle: string;
+	currentEmoji: string | null;
+	currentCoverImage: string | null;
+	currentCoverImageMeta: unknown;
+	currentVersionId: string | null;
+	versions: NoteVersionSummary[];
+	loading: boolean;
+	previewVersionId: string | null;
+	previewVersion: NoteVersionDetail | null;
+	previewLoading: boolean;
+	restoringVersionId: string | null;
+	onClose: () => void;
+	onRefresh: () => void;
+	onPreview: (versionId: string) => Promise<void>;
+	onRestore: (versionId: string) => Promise<void>;
 }
 
 function CoverPreview({
@@ -76,165 +76,166 @@ function CoverPreview({
 }
 
 function formatVersionTimestamp(value: string) {
-  const date = new Date(value)
+	const date = new Date(value);
 
-  if (isToday(date)) {
-    return formatDistanceToNowStrict(date, { addSuffix: true })
-  }
+	if (isToday(date)) {
+		return formatDistanceToNowStrict(date, { addSuffix: true });
+	}
 
-  if (isYesterday(date)) {
-    return `Yesterday at ${format(date, "p")}`
-  }
+	if (isYesterday(date)) {
+		return `Yesterday at ${format(date, "p")}`;
+	}
 
-  return format(date, "MMM d, yyyy 'at' p")
+	return format(date, "MMM d, yyyy 'at' p");
 }
 
 function countDifferences(a: unknown, b: unknown): number {
-  if (Object.is(a, b)) {
-    return 0
-  }
+	if (Object.is(a, b)) {
+		return 0;
+	}
 
-  if (typeof a !== typeof b) {
-    return 1
-  }
+	if (typeof a !== typeof b) {
+		return 1;
+	}
 
-  if (Array.isArray(a) && Array.isArray(b)) {
-    const maxLength = Math.max(a.length, b.length)
-    let total = 0
+	if (Array.isArray(a) && Array.isArray(b)) {
+		const maxLength = Math.max(a.length, b.length);
+		let total = 0;
 
-    for (let index = 0; index < maxLength; index += 1) {
-      total += countDifferences(a[index], b[index])
-    }
+		for (let index = 0; index < maxLength; index += 1) {
+			total += countDifferences(a[index], b[index]);
+		}
 
-    return total
-  }
+		return total;
+	}
 
-  if (a && b && typeof a === "object" && typeof b === "object") {
-    const keys = new Set([
-      ...Object.keys(a as Record<string, unknown>),
-      ...Object.keys(b as Record<string, unknown>),
-    ])
+	if (a && b && typeof a === "object" && typeof b === "object") {
+		const keys = new Set([...Object.keys(a as Record<string, unknown>), ...Object.keys(b as Record<string, unknown>)]);
 
-    let total = 0
-    for (const key of keys) {
-      total += countDifferences(
-        (a as Record<string, unknown>)[key],
-        (b as Record<string, unknown>)[key],
-      )
-    }
+		let total = 0;
+		for (const key of keys) {
+			total += countDifferences((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]);
+		}
 
-    return total
-  }
+		return total;
+	}
 
-  return 1
+	return 1;
 }
 
 function ReadOnlyPreview({ content }: { content: unknown }) {
-  const editorSchema = useMemo(
-    () =>
-      BlockNoteSchema.create({
-        blockSpecs: {
-          ...defaultBlockSpecs,
-          ...customBlockSpecs,
-        },
-        inlineContentSpecs: {
-          ...defaultInlineContentSpecs,
-          ...customInlineContentSpecs,
-        },
-      }),
-    [],
-  )
+	const editorSchema = useMemo(
+		() =>
+			BlockNoteSchema.create({
+				blockSpecs: {
+					...defaultBlockSpecs,
+					...customBlockSpecs,
+				},
+				inlineContentSpecs: {
+					...defaultInlineContentSpecs,
+					...customInlineContentSpecs,
+				},
+			}),
+		[],
+	);
 
-  const editor = useCreateBlockNote(
-    {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      initialContent: (Array.isArray(normalizeBlockNoteContent(content)) ? normalizeBlockNoteContent(content) : undefined) as any,
-      schema: editorSchema,
-    },
-    [content],
-  )
+	const editor = useCreateBlockNote(
+		{
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			initialContent: (Array.isArray(normalizeBlockNoteContent(content)) ? normalizeBlockNoteContent(content) : undefined) as any,
+			schema: editorSchema,
+		},
+		[content],
+	);
 
-  return (
-    <PreviewModeProvider value={true}>
-      <div className="h-full min-h-0 pointer-events-none select-none">
-        <BlockNoteView
-          editor={editor}
-          theme="dark"
-          slashMenu={false}
-          sideMenu={false}
-          editable={false}
-          formattingToolbar={false}
-          filePanel={false}
-          tableHandles={false}
-          className="h-full"
-        />
-      </div>
-    </PreviewModeProvider>
-  )
+	return (
+		<PreviewModeProvider value={true}>
+			<div className="h-full min-h-0 pointer-events-none select-none">
+				<BlockNoteView
+					editor={editor}
+					theme="dark"
+					slashMenu={false}
+					sideMenu={false}
+					editable={false}
+					formattingToolbar={false}
+					filePanel={false}
+					tableHandles={false}
+					className="h-full"
+				/>
+			</div>
+		</PreviewModeProvider>
+	);
 }
 
 export function NoteVersionsDialog({
-  open,
-  currentContent,
-  currentTitle,
-  currentEmoji,
-  currentCoverImage,
-  currentCoverImageMeta,
-  currentVersionId,
-  versions,
-  loading,
-  previewVersionId,
-  previewVersion,
-  previewLoading,
-  restoringVersionId,
-  onClose,
-  onRefresh,
-  onPreview,
-  onRestore,
+	open,
+	currentContent,
+	currentTitle,
+	currentEmoji,
+	currentCoverImage,
+	currentCoverImageMeta,
+	currentVersionId,
+	versions,
+	loading,
+	previewVersionId,
+	previewVersion,
+	previewLoading,
+	restoringVersionId,
+	onClose,
+	onRefresh,
+	onPreview,
+	onRestore,
 }: NoteVersionsDialogProps) {
-  const currentScrollRef = useRef<HTMLDivElement | null>(null)
-  const selectedScrollRef = useRef<HTMLDivElement | null>(null)
-  const scrollSyncRef = useRef<"current" | "selected" | null>(null)
+	const currentScrollRef = useRef<HTMLDivElement | null>(null);
+	const selectedScrollRef = useRef<HTMLDivElement | null>(null);
+	const scrollSyncRef = useRef<"current" | "selected" | null>(null);
+	const [showVersionsPanel, setShowVersionsPanel] = useState(true);
 
-  const selectedDiffCount = useMemo(() => {
-    if (!previewVersion) {
-      return 0
-    }
+	useEffect(() => {
+		if (open) {
+			setShowVersionsPanel(previewVersionId ? false : true);
+		}
+	}, [open, previewVersionId]);
 
-    return countDifferences(
-      {
-        content: currentContent,
-        title: currentTitle ?? null,
-        emoji: currentEmoji ?? null,
-      },
-      {
-        content: previewVersion.content,
-        title: previewVersion.title ?? null,
-        emoji: previewVersion.emoji ?? null,
-      },
-    )
-  }, [currentContent, currentEmoji, currentTitle, previewVersion])
+	const selectedDiffCount = useMemo(() => {
+		if (!previewVersion) {
+			return 0;
+		}
 
-  const syncScroll = (source: "current" | "selected") => {
-    const sourceElement = source === "current" ? currentScrollRef.current : selectedScrollRef.current
-    const targetElement = source === "current" ? selectedScrollRef.current : currentScrollRef.current
+		return countDifferences(
+			{
+				content: currentContent,
+				title: currentTitle ?? null,
+				emoji: currentEmoji ?? null,
+			},
+			{
+				content: previewVersion.content,
+				title: previewVersion.title ?? null,
+				emoji: previewVersion.emoji ?? null,
+			},
+		);
+	}, [currentContent, currentEmoji, currentTitle, previewVersion]);
 
-    if (!sourceElement || !targetElement) {
-      return
-    }
+	const syncScroll = (source: "current" | "selected") => {
+		const sourceElement = source === "current" ? currentScrollRef.current : selectedScrollRef.current;
+		const targetElement = source === "current" ? selectedScrollRef.current : currentScrollRef.current;
 
-    scrollSyncRef.current = source
-    targetElement.scrollTop = sourceElement.scrollTop
-    targetElement.scrollLeft = sourceElement.scrollLeft
+		if (!sourceElement || !targetElement) {
+			return;
+		}
 
-    requestAnimationFrame(() => {
-      if (scrollSyncRef.current === source) {
-        scrollSyncRef.current = null
-      }
-    })
-  }
+		scrollSyncRef.current = source;
+		targetElement.scrollTop = sourceElement.scrollTop;
+		targetElement.scrollLeft = sourceElement.scrollLeft;
 
-  return (
+		requestAnimationFrame(() => {
+			if (scrollSyncRef.current === source) {
+				scrollSyncRef.current = null;
+			}
+		});
+	};
+
+	return (
 		<Dialog
 			open={open}
 			onOpenChange={(nextOpen) => {
@@ -255,9 +256,16 @@ export function NoteVersionsDialog({
 					</DialogHeader>
 
 					<div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[360px_minmax(0,1fr)]">
-						<div className="flex min-h-0 flex-col border-b md:border-r md:border-b-0" style={{ borderColor: "var(--border-default)" }}>
-							<div className="border-b px-3 py-2 text-xs" style={{ borderColor: "var(--border-default)", color: "var(--text-tertiary)" }}>
-								{loading ? "Loading checkpoints..." : `${versions.length} checkpoints`}
+					<div
+							className={`flex min-h-0 flex-col overflow-hidden border-b md:border-r md:border-b-0 ${showVersionsPanel ? "" : "hidden md:flex"}`}
+							style={{ borderColor: "var(--border-default)" }}>
+							<div
+								className="flex items-center justify-between gap-2 border-b px-3 py-2 text-xs"
+								style={{ borderColor: "var(--border-default)", color: "var(--text-tertiary)" }}>
+								<span>{loading ? "Loading checkpoints..." : `${versions.length} checkpoints`}</span>
+								<Button variant="outline" className="h-7 px-2 text-xs md:hidden" onClick={() => setShowVersionsPanel(false)}>
+									View Preview
+								</Button>
 							</div>
 
 							<div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -273,6 +281,10 @@ export function NoteVersionsDialog({
 									versions.map((version) => {
 										const isActive = previewVersionId === version.id;
 										const isCurrent = currentVersionId === version.id;
+										const handlePreview = () => {
+											void onPreview(version.id);
+											setShowVersionsPanel(false);
+										};
 
 										return (
 											<div
@@ -280,11 +292,11 @@ export function NoteVersionsDialog({
 												role="button"
 												tabIndex={0}
 												aria-pressed={isActive}
-												onClick={() => void onPreview(version.id)}
+												onClick={handlePreview}
 												onKeyDown={(event) => {
 													if (event.key === "Enter" || event.key === " ") {
 														event.preventDefault();
-														void onPreview(version.id);
+														handlePreview();
 													}
 												}}
 												className="group/version-item mb-2 cursor-pointer rounded-[var(--sn-radius-md)] border px-3 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(0,0,0,0.25)]"
@@ -350,7 +362,7 @@ export function NoteVersionsDialog({
 							</div>
 						</div>
 
-						<div className="flex h-full min-h-0 min-w-0 flex-col">
+						<div className={`flex h-full min-h-0 min-w-0 flex-col ${showVersionsPanel ? "hidden md:flex" : ""}`}>
 							<div
 								className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2"
 								style={{ borderColor: "var(--border-default)" }}>
@@ -385,6 +397,9 @@ export function NoteVersionsDialog({
 									)}
 								</div>
 								<div className="flex flex-wrap items-center gap-2">
+									<Button variant="outline" onClick={() => setShowVersionsPanel(true)} className="h-7 px-2 text-xs md:hidden">
+										Checkpoints
+									</Button>
 									<Button variant="outline" onClick={onRefresh} className="h-7 px-2 text-xs">
 										Refresh
 									</Button>
@@ -478,5 +493,5 @@ export function NoteVersionsDialog({
 				</div>
 			</DialogContent>
 		</Dialog>
-  );
+	);
 }

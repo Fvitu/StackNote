@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
-import { ensureDbReady } from "@/lib/dbInit"
 import { prisma } from "@/lib/prisma"
+import { invalidateWorkspaceTree } from "@/lib/server-data"
 
 export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-
-  await ensureDbReady(prisma)
 
   const body = await req.json()
   const { workspaceId, folderId } = body
@@ -38,6 +36,8 @@ export async function POST(req: NextRequest) {
       order: (maxOrder._max.order ?? -1) + 1,
     },
   })
+
+  await invalidateWorkspaceTree(session.user.id, workspaceId)
 
   return NextResponse.json(note, { status: 201 })
 }

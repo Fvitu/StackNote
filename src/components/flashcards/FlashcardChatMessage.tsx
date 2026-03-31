@@ -1,9 +1,20 @@
 "use client"
 
+import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton";
 
-import { FlashcardViewer } from "./FlashcardViewer"
 import type { FlashcardDeckPayload } from "./types"
+
+const FlashcardViewerClient = dynamic(() => import("./FlashcardViewer").then((module) => module.FlashcardViewer), {
+	ssr: false,
+	loading: () => (
+		<div className="grid gap-3 md:grid-cols-2">
+			<Skeleton className="h-32 rounded-[14px]" />
+			<Skeleton className="h-32 rounded-[14px]" />
+		</div>
+	),
+});
 
 interface FlashcardChatMessageProps {
   deck: FlashcardDeckPayload
@@ -34,7 +45,7 @@ export function FlashcardChatMessage({ deck, onOpenDeck }: FlashcardChatMessageP
         </div>
      </div>
 
-      <FlashcardViewer cards={deck.cards} />
+      <FlashcardViewerClient cards={deck.cards} />
     </div>
   )
 }

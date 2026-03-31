@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { JetBrains_Mono } from "next/font/google";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryProvider } from "@/components/providers/QueryProvider";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
@@ -34,10 +34,10 @@ export default function RootLayout({
 	return (
 		<html lang="en" className="dark" data-theme="dark">
 			<body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
-				<TooltipProvider>
+				<QueryProvider>
 					{children}
 					<Analytics />
-				</TooltipProvider>
+				</QueryProvider>
 			</body>
 		</html>
 	);

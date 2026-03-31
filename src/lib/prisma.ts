@@ -5,16 +5,25 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-const POOLED_DATABASE_ENV_KEYS = ["DATABASE_URL_POOLED", "DATABASE_POOLER_URL", "POSTGRES_PRISMA_URL", "POSTGRES_URL"] as const;
-
-function getEnvValue(key: string): string | undefined {
-	const value = process.env[key];
+function getEnvValue(value: string | undefined): string | undefined {
 	if (!value) {
 		return undefined;
 	}
 
 	const trimmed = value.trim();
 	return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveDatabaseEnvValues() {
+	const pooledUrl =
+		getEnvValue(process.env.DATABASE_URL_POOLED) ??
+		getEnvValue(process.env.DATABASE_POOLER_URL) ??
+		getEnvValue(process.env.POSTGRES_PRISMA_URL) ??
+		getEnvValue(process.env.POSTGRES_URL);
+
+	const directUrl = getEnvValue(process.env.DATABASE_URL) ?? getEnvValue(process.env.DIRECT_URL);
+
+	return { pooledUrl, directUrl };
 }
 
 function isLikelyDirectSupabaseUrl(connectionString: string): boolean {
@@ -30,9 +39,8 @@ function isLikelyDirectSupabaseUrl(connectionString: string): boolean {
 }
 
 function resolveDatabaseConnectionString(): string {
-	const isVercelRuntime = process.env.VERCEL === "1" || typeof process.env.VERCEL_ENV === "string";
-	const pooledUrl = POOLED_DATABASE_ENV_KEYS.map((key) => getEnvValue(key)).find(Boolean);
-	const directUrl = getEnvValue("DATABASE_URL");
+	const isVercelRuntime = process.env.VERCEL === "1" || Boolean(getEnvValue(process.env.VERCEL_ENV));
+	const { pooledUrl, directUrl } = resolveDatabaseEnvValues();
 
 	const connectionString = isVercelRuntime ? (pooledUrl ?? directUrl) : (directUrl ?? pooledUrl);
 

@@ -1,28 +1,15 @@
-"use client"
+"use client";
 
-import { useState, useCallback, useEffect } from "react"
-import {
-  Plus,
-  Search,
-  ChevronDown,
-  LogOut,
-  User,
-  PanelLeftClose,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  DropdownMenuGroup,
-} from "@/components/ui/dropdown-menu"
-import { useWorkspace } from "@/contexts/WorkspaceContext"
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Plus, Search, ChevronDown, LogOut, User, PanelLeftClose } from "lucide-react";
+import { useDebouncedCallback } from "use-debounce";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { SidebarItem } from "./SidebarItem";
-import { signOutAction } from "@/app/actions"
-import type { FolderTreeItem, WorkspaceTree } from "@/types"
+import { signOutAction } from "@/app/actions";
+import { fetchNote } from "@/lib/note-client";
+import { queryKeys } from "@/lib/query-keys";
+import type { FolderTreeItem, WorkspaceTree } from "@/types";
 
 type OptimisticResult = Promise<{ id: string } | null | void>;
 type AsyncResult = Promise<void | null>;
@@ -71,12 +58,26 @@ export function Sidebar({
 	onMoveFolder: onMoveFolderOptimistic,
 	onFolderVisited,
 }: SidebarProps) {
+	const queryClient = useQueryClient();
 	const { state, setActiveNote, toggleFolder, toggleSidebar } = useWorkspace();
 	const [renamingId, setRenamingId] = useState<string | null>(null);
+	const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
+	const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
 
 	// Drag & drop state
 	const [draggedItem, setDraggedItem] = useState<{ id: string; type: "note" | "folder" } | null>(null);
 	const [dropTargetId, setDropTargetId] = useState<string | "root" | null>(null);
+	const prefetchNote = useDebouncedCallback((noteId: string) => {
+		if (typeof navigator !== "undefined" && !navigator.onLine) {
+			return;
+		}
+
+		void queryClient.prefetchQuery({
+			queryKey: queryKeys.note(noteId),
+			queryFn: () => fetchNote(noteId),
+			staleTime: 30_000,
+		});
+	}, 200);
 
 	const handleCreateNote = useCallback(
 		async (folderId?: string) => {
@@ -225,6 +226,38 @@ export function Sidebar({
 		return () => window.removeEventListener("dragend", handler);
 	}, []);
 
+	useEffect(() => {
+		return () => {
+			prefetchNote.cancel();
+		};
+	}, [prefetchNote]);
+
+	useEffect(() => {
+		if (!isWorkspaceMenuOpen) {
+			return;
+		}
+
+		const handlePointerDown = (event: MouseEvent) => {
+			if (workspaceMenuRef.current && !workspaceMenuRef.current.contains(event.target as Node)) {
+				setIsWorkspaceMenuOpen(false);
+			}
+		};
+
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setIsWorkspaceMenuOpen(false);
+			}
+		};
+
+		window.addEventListener("mousedown", handlePointerDown);
+		window.addEventListener("keydown", handleKeyDown);
+
+		return () => {
+			window.removeEventListener("mousedown", handlePointerDown);
+			window.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [isWorkspaceMenuOpen]);
+
 	const handleDropOnFolder = useCallback(
 		async (_e: React.DragEvent, folderId: string) => {
 			if (!draggedItem) return;
@@ -363,6 +396,7 @@ export function Sidebar({
 							depth={depth + 1}
 							isActive={state.activeNoteId === note.id}
 							isRenaming={renamingId === note.id}
+							onMouseEnter={() => prefetchNote(note.id)}
 							onClick={() => {
 								setActiveNote(note.id);
 								onFolderVisited?.(folder.id);
@@ -416,8 +450,14 @@ export function Sidebar({
 			}}>
 			{/* Workspace header */}
 			<div className="flex h-12 items-center gap-2 px-3" style={{ borderBottom: "1px solid var(--border-default)" }}>
-				<DropdownMenu>
-					<DropdownMenuTrigger id={`workspace-menu-trigger-${workspaceId}`} className="flex min-w-0 flex-1 items-center gap-2 rounded-[var(--sn-radius-sm)] px-1 py-1 transition-colors duration-150 hover:bg-[#1a1a1a]">
+				<div ref={workspaceMenuRef} className="relative min-w-0 flex-1">
+					<button
+						id={`workspace-menu-trigger-${workspaceId}`}
+						type="button"
+						aria-haspopup="menu"
+						aria-expanded={isWorkspaceMenuOpen}
+						onClick={() => setIsWorkspaceMenuOpen((value) => !value)}
+						className="flex w-full min-w-0 items-center gap-2 rounded-[var(--sn-radius-sm)] px-1 py-1 text-left transition-colors duration-150 hover:bg-[#1a1a1a]">
 						<div
 							className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-xs font-semibold"
 							style={{
@@ -426,21 +466,21 @@ export function Sidebar({
 							}}>
 							{workspaceName.slice(0, 2).toUpperCase()}
 						</div>
-						<span className="flex-1 truncate text-left text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+						<span className="flex-1 truncate text-sm font-medium" style={{ color: "var(--text-primary)" }}>
 							{workspaceName}
 						</span>
 						<ChevronDown className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--text-tertiary)" }} />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent
-						align="start"
-						side="bottom"
-						className="min-w-[200px]"
-						style={{
-							backgroundColor: "var(--bg-hover)",
-							border: "1px solid var(--border-strong)",
-						}}>
-						<DropdownMenuGroup>
-							<DropdownMenuLabel>
+					</button>
+
+					{isWorkspaceMenuOpen && (
+						<div
+							role="menu"
+							className="absolute left-0 top-[calc(100%+0.375rem)] z-50 min-w-[200px] rounded-lg p-1 shadow-md ring-1 ring-foreground/10 fade-in"
+							style={{
+								backgroundColor: "var(--bg-hover)",
+								border: "1px solid var(--border-strong)",
+							}}>
+							<div className="px-1.5 py-1">
 								<div className="flex items-center gap-2">
 									<div
 										className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold"
@@ -459,24 +499,40 @@ export function Sidebar({
 										</p>
 									</div>
 								</div>
-							</DropdownMenuLabel>
-						</DropdownMenuGroup>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem onClick={onAccountOpen}>
-							<User className="h-3.5 w-3.5" />
-							Account
-						</DropdownMenuItem>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							variant="destructive"
-							onClick={async () => {
-								await signOutAction();
-							}}>
-							<LogOut className="h-3.5 w-3.5" />
-							Sign out
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
+							</div>
+
+							<div className="-mx-1 my-1 h-px bg-border" />
+
+							<button
+								type="button"
+								role="menuitem"
+								onClick={() => {
+									setIsWorkspaceMenuOpen(false);
+									onAccountOpen();
+								}}
+								className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground"
+								style={{ color: "var(--text-primary)" }}>
+								<User className="h-3.5 w-3.5" />
+								Account
+							</button>
+
+							<div className="-mx-1 my-1 h-px bg-border" />
+
+							<button
+								type="button"
+								role="menuitem"
+								onClick={async () => {
+									setIsWorkspaceMenuOpen(false);
+									await signOutAction();
+								}}
+								className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-destructive/10"
+								style={{ color: "var(--text-primary)" }}>
+								<LogOut className="h-3.5 w-3.5" />
+								Sign out
+							</button>
+						</div>
+					)}
+				</div>
 
 				{/* Collapse sidebar button */}
 				<button
@@ -489,21 +545,21 @@ export function Sidebar({
 
 			{/* Quick actions */}
 			<div className="space-y-1 p-2">
-				<Button
-					variant="ghost"
+				<button
+					type="button"
 					onClick={() => handleCreateNote()}
-					className="h-8 w-full justify-start gap-2 px-2 text-sm text-[#888888] hover:bg-[#1a1a1a] hover:text-[#e8e8e8]">
+					className="inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-sm text-[#888888] transition-colors duration-150 hover:bg-[#1a1a1a] hover:text-[#e8e8e8]">
 					<Plus className="h-4 w-4" />
 					New Note
-				</Button>
-				<Button
-					variant="ghost"
-					className="h-8 w-full justify-start gap-2 px-2 text-sm text-[#888888] hover:bg-[#1a1a1a] hover:text-[#e8e8e8]"
+				</button>
+				<button
+					type="button"
+					className="inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-sm text-[#888888] transition-colors duration-150 hover:bg-[#1a1a1a] hover:text-[#e8e8e8]"
 					onClick={onSearchOpen}>
 					<Search className="h-4 w-4" />
 					Search
 					<span className="ml-auto text-xs text-[#555555]">Ctrl+K</span>
-				</Button>
+				</button>
 			</div>
 
 			{/* File tree */}
@@ -531,6 +587,7 @@ export function Sidebar({
 							depth={0}
 							isActive={state.activeNoteId === note.id}
 							isRenaming={renamingId === note.id}
+							onMouseEnter={() => prefetchNote(note.id)}
 							onClick={() => {
 								setActiveNote(note.id);
 								onFolderVisited?.(null);
@@ -581,13 +638,13 @@ export function Sidebar({
 
 			{/* Bottom: New folder button */}
 			<div className="p-2" style={{ borderTop: "1px solid var(--border-default)" }}>
-				<Button
-					variant="ghost"
+				<button
+					type="button"
 					onClick={() => handleCreateFolder()}
-					className="h-8 w-full justify-start gap-2 px-2 text-xs text-[#555555] hover:bg-[#1a1a1a] hover:text-[#888888]">
+					className="inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-xs text-[#555555] transition-colors duration-150 hover:bg-[#1a1a1a] hover:text-[#888888]">
 					<Plus className="h-3.5 w-3.5" />
 					New Folder
-				</Button>
+				</button>
 			</div>
 		</div>
 	);

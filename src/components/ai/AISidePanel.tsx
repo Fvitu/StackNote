@@ -1,22 +1,24 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, CheckSquare, Layers, Plus, Search, Send, Square, Sparkles, Trash2, X } from "lucide-react";
 import { ChatMessage, type Message } from "./ChatMessage";
 import { ModelSelector } from "./ModelSelector";
 import { SuggestedPrompts } from "./SuggestedPrompts";
 import { UsageIndicator } from "./UsageIndicator";
-import { GenerateFlashcardsDialog } from "@/components/flashcards/GenerateFlashcardsDialog";
 import type { FlashcardDeckPayload } from "@/components/flashcards/types";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DEFAULT_TEXT_MODEL, isValidTextModel, type TextModelId } from "@/lib/groq-models";
 import { noteContentToText } from "@/lib/ai/note-content";
 import { parseFlashcardDeckMessage } from "@/lib/flashcard-chat-message";
+import { fetchJson } from "@/lib/api-client";
 import { readErrorMessage, readJsonResponse } from "@/lib/http";
 import { notifyAiUsageChanged } from "@/lib/ai-usage-events";
-import type { FolderTreeItem, NoteTreeItem, WorkspaceTree } from "@/types";
+import { queryKeys } from "@/lib/query-keys";
 
-interface AISidePanelProps {
+export interface AISidePanelProps {
 	workspaceId: string;
 	noteId: string;
 	noteTitle?: string;
@@ -32,6 +34,10 @@ interface ContextNoteOption {
 	emoji?: string | null;
 	path: string;
 	contentText?: string;
+}
+
+interface ContextNotesResponse {
+	notes: ContextNoteOption[];
 }
 
 interface ChatSessionSummary {
@@ -68,6 +74,27 @@ interface CachedChatSessionState {
 
 const STORAGE_PREFIX = "ai-active-session-id:";
 const CONTEXT_MODE_STORAGE_PREFIX = "ai-context-selection-mode:";
+const GenerateFlashcardsDialogClient = dynamic(
+	() => import("@/components/flashcards/GenerateFlashcardsDialog").then((module) => module.GenerateFlashcardsDialog),
+	{
+		ssr: false,
+		loading: () => (
+			<Dialog open>
+				<DialogContent showCloseButton={false} className="sm:max-w-lg">
+					<DialogHeader>
+						<DialogTitle>Generate flashcards</DialogTitle>
+						<DialogDescription>Preparing the flashcard generator…</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-3">
+						<div className="stacknote-skeleton h-10 rounded-[10px]" />
+						<div className="stacknote-skeleton h-10 rounded-[10px]" />
+						<div className="stacknote-skeleton h-24 rounded-[14px]" />
+					</div>
+				</DialogContent>
+			</Dialog>
+		),
+	},
+);
 
 type ContextSelectionMode = "current" | "all" | "manual";
 
@@ -118,32 +145,6 @@ function inferContextSelectionMode(
 	return "manual";
 }
 
-function flattenWorkspaceTree(tree: WorkspaceTree) {
-	const flattened: ContextNoteOption[] = [];
-
-	const pushNote = (note: NoteTreeItem, path: string) => {
-		flattened.push({
-			id: note.id,
-			title: note.title || "Untitled",
-			emoji: note.emoji ?? null,
-			path,
-			contentText: note.contentText,
-		});
-	};
-
-	const visitFolder = (folder: FolderTreeItem, parentPath: string[]) => {
-		const nextPath = [...parentPath, folder.name];
-		const pathLabel = nextPath.join(" / ");
-		for (const note of folder.notes) pushNote(note, pathLabel);
-		for (const child of folder.children) visitFolder(child, nextPath);
-	};
-
-	for (const note of tree.rootNotes) pushNote(note, "Workspace");
-	for (const folder of tree.folders) visitFolder(folder, []);
-
-	return flattened.sort((left, right) => (left.path !== right.path ? left.path.localeCompare(right.path) : left.title.localeCompare(right.title)));
-}
-
 function buildCurrentNoteOption(noteId: string, noteTitle?: string): ContextNoteOption {
 	return {
 		id: noteId,
@@ -177,6 +178,7 @@ function hydrateChatMessage(message: { id: string; role: "user" | "assistant"; c
 }
 
 export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onAppendToNote, isOpen, onClose }: AISidePanelProps) {
+	const queryClient = useQueryClient();
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [input, setInput] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
@@ -212,6 +214,21 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 	const sessionStateCacheRef = useRef(new Map<string, CachedChatSessionState>());
 	const sessionLoadRequestIdRef = useRef(0);
 	const suppressSessionHydrationRef = useRef(false);
+
+	const settingsQuery = useQuery({
+		queryKey: queryKeys.settings,
+		queryFn: () => fetchJson<{ preferredTextModel?: string }>("/api/settings"),
+		initialData: () => queryClient.getQueryData<{ preferredTextModel?: string }>(queryKeys.settings),
+		staleTime: 60_000,
+		enabled: isOpen,
+	});
+
+	const contextNotesQuery = useQuery({
+		queryKey: ["ai", "context-notes", workspaceId],
+		queryFn: () => fetchJson<ContextNotesResponse>(`/api/ai/context-notes?workspaceId=${encodeURIComponent(workspaceId)}`),
+		staleTime: 30_000,
+		enabled: isOpen,
+	});
 
 	useEffect(() => {
 		activeSessionIdRef.current = activeSessionId;
@@ -256,53 +273,19 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 	}, [input]);
 
 	useEffect(() => {
-		let ignore = false;
-		async function loadPreferredModel() {
-			try {
-				const response = await fetch("/api/settings");
-				const data = await readJsonResponse<{ preferredTextModel?: string }>(response);
-				if (!ignore && response.ok && data?.preferredTextModel && isValidTextModel(data.preferredTextModel)) {
-					setModel(data.preferredTextModel);
-				}
-			} catch (loadError) {
-				console.error("Failed to load preferred text model:", loadError);
-			}
+		const preferredTextModel = settingsQuery.data?.preferredTextModel;
+		if (preferredTextModel && isValidTextModel(preferredTextModel)) {
+			setModel(preferredTextModel);
 		}
-		void loadPreferredModel();
-		return () => {
-			ignore = true;
-		};
-	}, []);
+	}, [settingsQuery.data?.preferredTextModel]);
 
 	useEffect(() => {
-		let ignore = false;
-		async function loadContextNotes() {
-			setNotesLoading(true);
-			setNotesError(null);
-			try {
-				const response = await fetch(`/api/workspace/${workspaceId}/tree`);
-				const data = await readJsonResponse<WorkspaceTree>(response);
-				if (!response.ok || !data) throw new Error("Failed to load workspace notes");
-				if (ignore) return;
-				const nextAvailableNotes = ensureCurrentNoteOption(flattenWorkspaceTree(data), noteId, noteTitle);
-				setAvailableNotes(nextAvailableNotes);
-				setSelectedNoteIds((previousSelection) => normalizeSelection(previousSelection, nextAvailableNotes, noteId));
-			} catch (loadError) {
-				if (ignore) return;
-				console.error("Failed to load AI context notes:", loadError);
-				const fallbackNotes = [buildCurrentNoteOption(noteId, noteTitle)];
-				setAvailableNotes(fallbackNotes);
-				setSelectedNoteIds((previousSelection) => normalizeSelection(previousSelection, fallbackNotes, noteId));
-				setNotesError(loadError instanceof Error ? loadError.message : "Failed to load notes");
-			} finally {
-				if (!ignore) setNotesLoading(false);
-			}
-		}
-		void loadContextNotes();
-		return () => {
-			ignore = true;
-		};
-	}, [workspaceId, noteId, noteTitle]);
+		const nextAvailableNotes = ensureCurrentNoteOption(contextNotesQuery.data?.notes ?? [], noteId, noteTitle);
+		setAvailableNotes(nextAvailableNotes);
+		setSelectedNoteIds((previousSelection) => normalizeSelection(previousSelection, nextAvailableNotes, noteId));
+		setNotesLoading(contextNotesQuery.isLoading);
+		setNotesError(contextNotesQuery.isError ? contextNotesQuery.error?.message ?? "Failed to load notes" : null);
+	}, [contextNotesQuery.data?.notes, contextNotesQuery.error?.message, contextNotesQuery.isError, contextNotesQuery.isLoading, noteId, noteTitle]);
 
 	const normalizeCachedSelection = useCallback(
 		(selectedIds: string[]) => normalizeSelection(selectedIds.length > 0 ? selectedIds : [noteId], availableNotesRef.current, noteId),
@@ -943,7 +926,7 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 					</p>
 				</div>
 
-				<GenerateFlashcardsDialog
+				<GenerateFlashcardsDialogClient
 					open={isFlashcardDialogOpen}
 					onClose={() => setIsFlashcardDialogOpen(false)}
 					onGenerated={handleFlashcardsGenerated}

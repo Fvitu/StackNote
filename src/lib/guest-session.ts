@@ -1,12 +1,11 @@
 import { prisma } from "@/lib/prisma"
-import { ensureDbReady } from "@/lib/dbInit"
 import { createAdminClient } from "@/lib/supabase/server"
 
 const STORAGE_BUCKET = "stacknote-files"
 
 export const GUEST_INACTIVITY_MS = 24 * 60 * 60 * 1000
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000
-const GUEST_TOUCH_INTERVAL_MS = 5 * 60 * 1000
+export const GUEST_TOUCH_INTERVAL_MS = 5 * 60 * 1000
 
 let cleanupPromise: Promise<void> | null = null
 let lastCleanupAt = 0
@@ -28,8 +27,6 @@ export function createGuestIdentity() {
 }
 
 export async function createGuestUserWithWorkspace() {
-	await ensureDbReady(prisma)
-
 	const now = new Date()
 	const identity = createGuestIdentity()
 
@@ -73,8 +70,6 @@ async function removeStoredFiles(paths: string[]) {
 }
 
 export async function purgeGuestUser(userId: string) {
-	await ensureDbReady(prisma)
-
 	const files = await prisma.file.findMany({
 		where: { userId },
 		select: { path: true },
@@ -121,8 +116,6 @@ export async function touchGuestActivity(userId: string, lastActiveAt: Date | nu
 export async function cleanupExpiredGuestUsers() {
 	const now = Date.now()
 	const expiryDate = new Date(now - GUEST_INACTIVITY_MS)
-
-	await ensureDbReady(prisma)
 
 	const expiredGuests = await prisma.user.findMany({
 		where: {

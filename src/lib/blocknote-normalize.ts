@@ -1,4 +1,4 @@
-import { normalizeCodeLanguage } from "@/lib/editor-paste"
+import { normalizeCodeLanguage } from "@/lib/code-language"
 
 type UnknownRecord = Record<string, unknown>
 
