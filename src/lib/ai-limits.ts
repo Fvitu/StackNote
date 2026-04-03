@@ -1,10 +1,11 @@
 export const AI_LIMITS = {
-  MAX_CONTEXT_TOKENS: 4_000,
-  MAX_RESPONSE_TOKENS: 2_000,
-  MAX_AUDIO_FILE_MB: 25,
-  FLASHCARD_MAX_PER_REQUEST: 50,
-  ROLLING_WINDOW_MS: 24 * 60 * 60 * 1000,
-} as const
+	MAX_CONTEXT_TOKENS: 4_000,
+	MAX_RESPONSE_TOKENS: 2_000,
+	MAX_AUDIO_FILE_MB: 25,
+	FLASHCARD_MAX_PER_REQUEST: 20,
+	QUIZ_MAX_PER_REQUEST: 15,
+	ROLLING_WINDOW_MS: 24 * 60 * 60 * 1000,
+} as const;
 
 export const TEXT_MODEL_LIMITS = {
   "llama-3.3-70b-versatile": {
@@ -35,17 +36,30 @@ export const TEXT_MODEL_LIMITS = {
 } as const
 
 export const FLASHCARD_MODEL_LIMITS = {
-  "groq/compound": {
-    label: "Groq Compound",
-    requestsPerWindow: 15,
-    flashcardsPerWindow: 150,
-  },
-  "groq/compound-mini": {
-    label: "Groq Compound Mini",
-    requestsPerWindow: 15,
-    flashcardsPerWindow: 150,
-  },
-} as const
+	"groq/compound": {
+		label: "Groq Compound",
+		requestsPerWindow: 30,
+		flashcardsPerWindow: 50,
+	},
+	"groq/compound-mini": {
+		label: "Groq Compound Mini",
+		requestsPerWindow: 30,
+		flashcardsPerWindow: 50,
+	},
+} as const;
+
+export const QUIZ_MODEL_LIMITS = {
+	"groq/compound": {
+		label: "Groq Compound",
+		requestsPerWindow: 30,
+		questionsPerWindow: 30,
+	},
+	"groq/compound-mini": {
+		label: "Groq Compound Mini",
+		requestsPerWindow: 30,
+		questionsPerWindow: 30,
+	},
+} as const;
 
 export const STT_MODEL_LIMITS = {
   "whisper-large-v3": {
@@ -60,20 +74,24 @@ export const STT_MODEL_LIMITS = {
   },
 } as const
 
-export type QuotaCategory = "text" | "flashcard" | "voice"
+export type QuotaCategory = "text" | "flashcard" | "quiz" | "voice";
 
 export type TextQuotaModelId = keyof typeof TEXT_MODEL_LIMITS
 export type FlashcardQuotaModelId = keyof typeof FLASHCARD_MODEL_LIMITS
+export type QuizQuotaModelId = keyof typeof QUIZ_MODEL_LIMITS;
 export type SttQuotaModelId = keyof typeof STT_MODEL_LIMITS
-export type QuotaModelId = TextQuotaModelId | FlashcardQuotaModelId | SttQuotaModelId
+export type QuotaModelId = TextQuotaModelId | FlashcardQuotaModelId | QuizQuotaModelId | SttQuotaModelId;
 
 export type TextQuotaDefinition = (typeof TEXT_MODEL_LIMITS)[TextQuotaModelId]
 export type FlashcardQuotaDefinition = (typeof FLASHCARD_MODEL_LIMITS)[FlashcardQuotaModelId]
+export type QuizQuotaDefinition = (typeof QUIZ_MODEL_LIMITS)[QuizQuotaModelId];
 export type SttQuotaDefinition = (typeof STT_MODEL_LIMITS)[SttQuotaModelId]
-export type QuotaDefinition = TextQuotaDefinition | FlashcardQuotaDefinition | SttQuotaDefinition
+export type QuotaDefinition = TextQuotaDefinition | FlashcardQuotaDefinition | QuizQuotaDefinition | SttQuotaDefinition;
 
 export const PRIMARY_FLASHCARD_MODEL: FlashcardQuotaModelId = "groq/compound"
 export const FALLBACK_FLASHCARD_MODEL: FlashcardQuotaModelId = "groq/compound-mini"
+export const PRIMARY_QUIZ_MODEL: QuizQuotaModelId = "groq/compound";
+export const FALLBACK_QUIZ_MODEL: QuizQuotaModelId = "groq/compound-mini";
 
 export function getTextQuotaDefinition(model: string): TextQuotaDefinition | null {
   if (model in TEXT_MODEL_LIMITS) {
@@ -89,6 +107,13 @@ export function getFlashcardQuotaDefinition(model: string): FlashcardQuotaDefini
   return null
 }
 
+export function getQuizQuotaDefinition(model: string): QuizQuotaDefinition | null {
+	if (model in QUIZ_MODEL_LIMITS) {
+		return QUIZ_MODEL_LIMITS[model as QuizQuotaModelId];
+	}
+	return null;
+}
+
 export function getSttQuotaDefinition(model: string): SttQuotaDefinition | null {
   if (model in STT_MODEL_LIMITS) {
     return STT_MODEL_LIMITS[model as SttQuotaModelId]
@@ -98,14 +123,16 @@ export function getSttQuotaDefinition(model: string): SttQuotaDefinition | null 
 
 export function getQuotaDefinition(category: QuotaCategory, model: string): QuotaDefinition | null {
   switch (category) {
-    case "text":
-      return getTextQuotaDefinition(model)
-    case "flashcard":
-      return getFlashcardQuotaDefinition(model)
-    case "voice":
-      return getSttQuotaDefinition(model)
-    default:
-      return null
+		case "text":
+			return getTextQuotaDefinition(model);
+		case "flashcard":
+			return getFlashcardQuotaDefinition(model);
+		case "quiz":
+			return getQuizQuotaDefinition(model);
+		case "voice":
+			return getSttQuotaDefinition(model);
+		default:
+			return null;
   }
 }
 

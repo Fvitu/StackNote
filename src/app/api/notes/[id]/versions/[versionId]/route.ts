@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { buildFileAccessUrl } from "@/lib/file-url";
 import { prisma } from "@/lib/prisma"
-import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize"
-import { createAdminClient } from "@/lib/supabase/server"
+import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
 import { parseNoteCoverMeta } from "@/lib/note-cover"
-
-const COVER_BUCKET_NAME = "stacknote-files"
 
 async function resolveCoverImageUrl(
   coverImage: string | null | undefined,
@@ -16,20 +14,7 @@ async function resolveCoverImageUrl(
     return coverImage
   }
 
-  try {
-    const supabase = createAdminClient()
-    const { data, error } = await supabase.storage
-      .from(COVER_BUCKET_NAME)
-      .createSignedUrl(parsedMeta.filePath, 60 * 60 * 24 * 7)
-
-    if (!error && data?.signedUrl) {
-      return data.signedUrl
-    }
-  } catch {
-    // Fall back to the snapshot value if we cannot sign a fresh URL.
-  }
-
-  return coverImage
+  return buildFileAccessUrl(parsedMeta.fileId);
 }
 
 async function getAuthorizedNote(noteId: string, userId: string) {

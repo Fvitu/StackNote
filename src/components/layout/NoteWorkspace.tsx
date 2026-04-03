@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { FileText, Plus, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History, Sparkles } from "lucide-react";
+import { FileText, Plus, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History, Sparkles, Crosshair, Minimize2 } from "lucide-react";
 import { AIPanelSkeleton } from "@/components/ai/AIPanelSkeleton";
 import { LazyNoteEditor } from "@/components/editor/LazyNoteEditor";
 import type { NoteEditorRef } from "@/components/editor/NoteEditor";
@@ -95,6 +95,22 @@ const MAX_EDITOR_WIDTH = 1200;
 const DEFAULT_AI_PANEL_WIDTH = 360;
 const MIN_AI_PANEL_WIDTH = 320;
 const MAX_AI_PANEL_WIDTH = 760;
+
+function getMaxAllowedEditorWidth(): number {
+	if (typeof window === "undefined") {
+		return DEFAULT_EDITOR_WIDTH;
+	}
+
+	return Math.max(MIN_EDITOR_WIDTH, Math.min(MAX_EDITOR_WIDTH, Math.floor((window.innerWidth - 96) * 0.95)));
+}
+
+function getResolvedEditorWidth(note: NoteData): number {
+	const persistedWidth = getStoredNoteWidth(note.id);
+	const widthFromServer = typeof note.editorWidth === "number" ? note.editorWidth : null;
+	const viewportMax = getMaxAllowedEditorWidth();
+
+	return persistedWidth ?? (widthFromServer !== null ? Math.max(MIN_EDITOR_WIDTH, Math.min(MAX_EDITOR_WIDTH, widthFromServer)) : viewportMax);
+}
 
 function getRectFromMarquee(selection: MarqueeSelection): DOMRect {
 	const left = Math.min(selection.startX, selection.currentX);
@@ -217,7 +233,7 @@ function buildPlaceholderNote(note: NoteTreeItem, workspaceName: string): NoteDa
 }
 
 export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNoteCreated, onRefresh, isSidebarOpen, onToggleSidebar, tree }: NoteWorkspaceProps) {
-	const { setActiveNote } = useWorkspace();
+	const { state, setActiveNote, toggleFocusMode } = useWorkspace();
 	const queryClient = useQueryClient();
 	const noteCache = useNoteCache();
 	const [note, setNote] = useState<NoteData | null>(null);
@@ -231,6 +247,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 	const [isResizing, setIsResizing] = useState(false);
 	const editorShellRef = useRef<HTMLDivElement | null>(null);
 	const mainScrollRef = useRef<HTMLDivElement | null>(null);
+	const focusModeWidthSnapshotsRef = useRef<Map<string, number>>(new Map());
 	const marqueeSelectionRef = useRef<MarqueeSelection | null>(null);
 	const editorWidthDraftRef = useRef(DEFAULT_EDITOR_WIDTH);
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -336,19 +353,17 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 			setEditorResetToken((token) => token + 1);
 			setIsNewNote(nextNote.title === "Untitled" && !nextNote.content);
 
-			const persistedWidth = getStoredNoteWidth(nextNote.id);
-			const widthFromServer = typeof nextNote.editorWidth === "number" ? nextNote.editorWidth : null;
-			const viewportMax =
-				typeof window !== "undefined"
-					? Math.max(MIN_EDITOR_WIDTH, Math.min(MAX_EDITOR_WIDTH, Math.floor((window.innerWidth - 96) * 0.95)))
-					: DEFAULT_EDITOR_WIDTH;
+			const resolvedWidth = getResolvedEditorWidth(nextNote);
+			const nextWidth = state.isFocusMode ? getMaxAllowedEditorWidth() : resolvedWidth;
 
-			const nextWidth =
-				persistedWidth ?? (widthFromServer !== null ? Math.max(MIN_EDITOR_WIDTH, Math.min(MAX_EDITOR_WIDTH, widthFromServer)) : viewportMax);
+			if (state.isFocusMode && !focusModeWidthSnapshotsRef.current.has(nextNote.id)) {
+				focusModeWidthSnapshotsRef.current.set(nextNote.id, resolvedWidth);
+			}
+
 			setEditorWidth(nextWidth);
 			applyEditorWidth(nextWidth);
 		},
-		[applyEditorWidth, setCurrentNoteState],
+		[applyEditorWidth, setCurrentNoteState, state.isFocusMode],
 	);
 
 	const cacheNoteSnapshot = useCallback(
@@ -1436,6 +1451,10 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 	}, [applyAiPanelWidth, isAiPanelResizing]);
 
 	const startResize = (event: React.MouseEvent<HTMLDivElement>) => {
+		if (state.isFocusMode) {
+			return;
+		}
+
 		event.preventDefault();
 		resizeStartXRef.current = event.clientX;
 		resizeStartWidthRef.current = editorWidthDraftRef.current;
@@ -1458,9 +1477,71 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 		setIsAIPanelOpen((previous) => !previous);
 	}, []);
 
+	const handleToggleFocusMode = useCallback(() => {
+		const currentNote = noteRef.current;
+		if (currentNote && !state.isFocusMode) {
+			focusModeWidthSnapshotsRef.current.set(currentNote.id, editorWidthDraftRef.current);
+		}
+
+		toggleFocusMode();
+	}, [state.isFocusMode, toggleFocusMode]);
+
 	const handleCloseAIPanel = useCallback(() => {
 		setIsAIPanelOpen(false);
 	}, []);
+
+	useEffect(() => {
+		const currentNote = noteRef.current;
+		if (!currentNote) {
+			return;
+		}
+
+		if (state.isFocusMode) {
+			if (!focusModeWidthSnapshotsRef.current.has(currentNote.id)) {
+				focusModeWidthSnapshotsRef.current.set(currentNote.id, editorWidthDraftRef.current);
+			}
+
+			const focusWidth = getMaxAllowedEditorWidth();
+			setEditorWidth(focusWidth);
+			applyEditorWidth(focusWidth);
+			return;
+		}
+
+		const restoredWidth = focusModeWidthSnapshotsRef.current.get(currentNote.id);
+		if (typeof restoredWidth === "number") {
+			focusModeWidthSnapshotsRef.current.delete(currentNote.id);
+			setEditorWidth(restoredWidth);
+			applyEditorWidth(restoredWidth);
+		}
+
+		if (focusModeWidthSnapshotsRef.current.size > 0) {
+			focusModeWidthSnapshotsRef.current.clear();
+		}
+	}, [activeNoteId, applyEditorWidth, state.isFocusMode]);
+
+	useEffect(() => {
+		if (!state.isFocusMode) {
+			return;
+		}
+
+		const updateFocusWidth = () => {
+			const currentNote = noteRef.current;
+			if (!currentNote) {
+				return;
+			}
+
+			const focusWidth = getMaxAllowedEditorWidth();
+			setEditorWidth(focusWidth);
+			applyEditorWidth(focusWidth);
+		};
+
+		updateFocusWidth();
+		window.addEventListener("resize", updateFocusWidth);
+
+		return () => {
+			window.removeEventListener("resize", updateFocusWidth);
+		};
+	}, [applyEditorWidth, state.isFocusMode]);
 
 	useEffect(() => {
 		const handleGlobalUndoRedo = (event: KeyboardEvent) => {
@@ -1699,7 +1780,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 
 	return (
 		<div
-			className="flex flex-1 overflow-hidden fade-in"
+			className={`flex flex-1 overflow-hidden fade-in ${state.isFocusMode ? "stacknote-focus-mode" : ""}`}
 			style={{
 				backgroundColor: "var(--bg-app)",
 				transform: "none",
@@ -1739,13 +1820,16 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 					<div className="flex items-center gap-2">
 						<SaveIndicator status={saveStatus} />
 						<button
+							type="button"
 							onClick={openVersionsDialog}
-							className="flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 hover:bg-[#1a1a1a]"
-							title="View note history">
+							disabled={state.isFocusMode}
+							className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${state.isFocusMode ? "cursor-not-allowed opacity-40" : "hover:bg-[#1a1a1a]"}`}
+							title={state.isFocusMode ? "History is disabled in focus mode" : "View note history"}>
 							<History className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
 							<span style={{ color: "var(--text-tertiary)" }}>History</span>
 						</button>
 						<button
+							type="button"
 							onClick={() => editorRef.current?.undo()}
 							disabled={!canUndo}
 							className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30"
@@ -1753,6 +1837,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 							<Undo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
 						</button>
 						<button
+							type="button"
 							onClick={() => editorRef.current?.redo()}
 							disabled={!canRedo}
 							className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30"
@@ -1760,15 +1845,35 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 							<Redo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
 						</button>
 						<button
+							type="button"
 							onClick={handleToggleAIPanel}
-							className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${isAIPanelOpen ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
-							title="AI Assistant">
-							<Sparkles className="h-3.5 w-3.5" style={{ color: isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)" }} />
-							<span style={{ color: isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)" }}>AI</span>
+							disabled={state.isFocusMode}
+							className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${state.isFocusMode ? "cursor-not-allowed opacity-40" : isAIPanelOpen ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
+							title={state.isFocusMode ? "AI Assistant is disabled in focus mode" : "AI Assistant"}>
+							<Sparkles
+								className="h-3.5 w-3.5"
+								style={{ color: state.isFocusMode ? "var(--text-tertiary)" : isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)" }}
+							/>
+							<span style={{ color: state.isFocusMode ? "var(--text-tertiary)" : isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)" }}>
+								AI
+							</span>
+						</button>
+						<button
+							type="button"
+							onClick={handleToggleFocusMode}
+							className={`flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 ${state.isFocusMode ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
+							title={state.isFocusMode ? "Exit focus mode" : "Enter focus mode"}
+							aria-pressed={state.isFocusMode}>
+							{state.isFocusMode ? (
+								<Minimize2 className="h-3.5 w-3.5" style={{ color: "var(--sn-accent)" }} />
+							) : (
+								<Crosshair className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+							)}
 						</button>
 						<NoteActionsMenu
 							type="note"
 							align="end"
+							disabled={state.isFocusMode}
 							onChangeIcon={() => setEmojiPickerOpen(true)}
 							onDuplicate={handleDuplicate}
 							onSaveVersion={() => void handleManualVersion()}
@@ -1784,10 +1889,23 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 					className="mx-auto w-full flex-1 px-6 py-8"
 					style={{ maxWidth: "100%", userSelect: marqueeSelection ? "none" : undefined }}
 					onPointerDown={handleCanvasPointerDown}>
-					<NoteCoverPanel noteId={note.id} coverImage={note.coverImage} coverImageMeta={note.coverImageMeta} onCoverUpdated={handleCoverUpdated} />
+					<NoteCoverPanel
+						noteId={note.id}
+						coverImage={note.coverImage}
+						coverImageMeta={note.coverImageMeta}
+						onCoverUpdated={handleCoverUpdated}
+						disabled={state.isFocusMode}
+					/>
 
 					{/* Emoji icon & title row */}
-					<div className="mb-2 flex items-start gap-3">
+					<div
+						className="mb-2 flex items-start gap-3 transition-[opacity,transform] duration-200"
+						style={{
+							opacity: state.isFocusMode ? 0 : 1,
+							transform: state.isFocusMode ? "translateY(-8px)" : "translateY(0)",
+							pointerEvents: state.isFocusMode ? "none" : undefined,
+						}}
+						aria-hidden={state.isFocusMode}>
 						{/* Emoji selector button */}
 						<div ref={emojiWrapperRef} className="relative mt-1 shrink-0">
 							<button
@@ -1846,7 +1964,13 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 					<div
 						ref={editorShellRef}
 						className="group relative mt-2 mx-auto stacknote-editor-shell"
-						style={{ width: `${editorWidth}px`, maxWidth: "100%" }}>
+						style={{
+							width: `${editorWidth}px`,
+							maxWidth: "100%",
+							transition: "width 220ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1)",
+							willChange: "width",
+							transform: state.isFocusMode ? "translateY(-2px)" : "translateY(0)",
+						}}>
 						{isNoteHydrating ? (
 							<EditorSkeleton />
 						) : (
@@ -1861,19 +1985,20 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 							/>
 						)}
 						<div
-							onMouseDown={startResize}
+							onMouseDown={state.isFocusMode ? undefined : startResize}
 							className="absolute bottom-0 right-[-3px] top-0 z-20 w-3 cursor-ew-resize rounded duration-150"
 							style={{
 								backgroundColor: isResizing ? "rgba(124, 106, 255, 0.2)" : "transparent",
-								opacity: isResizing ? 1 : undefined,
+								opacity: state.isFocusMode ? 0 : isResizing ? 1 : undefined,
+								pointerEvents: state.isFocusMode ? "none" : undefined,
 							}}
 							onMouseEnter={(e) => {
-								if (!isResizing) {
+								if (!isResizing && !state.isFocusMode) {
 									(e.currentTarget as HTMLElement).style.backgroundColor = "rgba(124, 106, 255, 0.16)";
 								}
 							}}
 							onMouseLeave={(e) => {
-								if (!isResizing) {
+								if (!isResizing && !state.isFocusMode) {
 									(e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
 								}
 							}}
@@ -1916,11 +2041,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 						pointerEvents: isAIPanelOpen ? undefined : "none",
 						backgroundColor: "var(--bg-sidebar)",
 						width:
-							typeof window !== "undefined" && window.innerWidth < 768
-								? (isAIPanelOpen ? "100%" : 0)
-								: isAIPanelOpen
-									? `${aiPanelWidth}px`
-									: 0,
+							typeof window !== "undefined" && window.innerWidth < 768 ? (isAIPanelOpen ? "100%" : 0) : isAIPanelOpen ? `${aiPanelWidth}px` : 0,
 						opacity: isAIPanelOpen ? 1 : 0,
 						transform: isAIPanelOpen ? "translateX(0)" : "translateX(12px)",
 						transition: isAiPanelResizing ? "none" : "width 220ms ease, opacity 160ms linear, transform 220ms ease",

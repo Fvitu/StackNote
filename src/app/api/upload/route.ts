@@ -3,6 +3,7 @@ import { nanoid } from "nanoid"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { createAdminClient } from "@/lib/supabase/server"
+import { buildFileAccessUrl } from "@/lib/file-url";
 import { getFileExtension, isMediaType } from "@/lib/media"
 
 const BUCKET_NAME = "stacknote-files"
@@ -72,35 +73,50 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: uploadError.message }, { status: 500 })
   }
 
-  const { data: signedData, error: signedError } = await supabase.storage
-    .from(BUCKET_NAME)
-    .createSignedUrl(filePath, 60 * 60 * 24 * 7)
+  let savedFileId: string | null = null;
 
-  if (signedError || !signedData?.signedUrl) {
-    return NextResponse.json({ error: signedError?.message ?? "Failed to create signed URL" }, { status: 500 })
+  try {
+		const saved = await prisma.file.create({
+			data: {
+				noteId,
+				userId: session.user.id,
+				name: file.name,
+				type,
+				mimeType: file.type,
+				size: file.size,
+				path: filePath,
+				url: "",
+			},
+		});
+
+		savedFileId = saved.id;
+		const url = buildFileAccessUrl(saved.id);
+
+		await prisma.file.update({
+			where: { id: saved.id },
+			data: { url },
+		});
+
+		return NextResponse.json({
+			url,
+			fileId: saved.id,
+			filePath,
+			type,
+			name: file.name,
+			size: file.size,
+			mimeType: file.type,
+		});
+  } catch (error) {
+		console.error("Failed to persist uploaded file metadata:", error);
+
+		await supabase.storage
+			.from(BUCKET_NAME)
+			.remove([filePath])
+			.catch(() => undefined);
+		if (savedFileId) {
+			await prisma.file.deleteMany({ where: { id: savedFileId } }).catch(() => undefined);
+		}
+
+		return NextResponse.json({ error: "Failed to save uploaded file" }, { status: 500 });
   }
-
-
-  const saved = await prisma.file.create({
-    data: {
-      noteId,
-      userId: session.user.id,
-      name: file.name,
-      type,
-      mimeType: file.type,
-      size: file.size,
-      path: filePath,
-      url: signedData.signedUrl,
-    },
-  })
-
-  return NextResponse.json({
-    url: signedData.signedUrl,
-    fileId: saved.id,
-    filePath,
-    type,
-    name: file.name,
-    size: file.size,
-    mimeType: file.type,
-  })
 }

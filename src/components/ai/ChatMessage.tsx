@@ -5,9 +5,11 @@ import { User, Sparkles } from "lucide-react";
 import { AssistantContent } from "./AssistantContent";
 import { AssistantResponseActions } from "./AssistantResponseActions";
 import { FlashcardChatMessage } from "@/components/flashcards/FlashcardChatMessage";
+import { QuizChatMessage } from "./QuizChatMessage";
 import type { FlashcardDeckPayload } from "@/components/flashcards/types";
 import { TEXT_MODELS } from "@/lib/groq-models";
 import { parseAssistantResponseContent } from "@/lib/ai-response";
+import type { QuizHistoryPayload } from "@/lib/quiz";
 
 export interface Message {
 	id: string;
@@ -21,17 +23,20 @@ export interface Message {
 		totalTokens: number;
 	};
 	flashcardDeck?: FlashcardDeckPayload;
+	quizHistory?: QuizHistoryPayload;
 }
 
 interface ChatMessageProps {
 	message: Message;
 	isStreaming?: boolean;
 	onAppendToNote?: (markdown: string) => boolean;
+	onOpenQuiz?: (questions: QuizHistoryPayload["questions"]) => void;
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onAppendToNote }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onAppendToNote, onOpenQuiz }: ChatMessageProps) {
 	const isUser = message.role === "user";
 	const hasFlashcardDeck = message.role === "assistant" && Boolean(message.flashcardDeck);
+	const hasQuizHistory = message.role === "assistant" && Boolean(message.quizHistory);
 	const parsedAssistantContent = !isUser ? parseAssistantResponseContent(message.content) : null;
 	const visibleAssistantContent = !isUser ? (parsedAssistantContent?.finalContent ?? message.content) : "";
 	const finalAssistantContent = !isUser ? visibleAssistantContent.trim() : "";
@@ -51,6 +56,10 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onA
 			{hasFlashcardDeck ? (
 				<div className="min-w-0 max-w-[95%] flex-1">
 					<FlashcardChatMessage deck={message.flashcardDeck!} />
+				</div>
+			) : hasQuizHistory ? (
+				<div className="min-w-0 max-w-[95%] flex-1">
+					<QuizChatMessage quiz={message.quizHistory!} onStartQuiz={onOpenQuiz} />
 				</div>
 			) : (
 				<div

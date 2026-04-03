@@ -16,16 +16,18 @@ export default async function AppLayout({
   const workspace = await getCurrentWorkspace(session.user.id);
 
   return (
-		<AppShell
-			initialShell={{
-				workspaceName: workspace?.name ?? "Workspace",
-				userName: session.user.name,
-				userEmail: session.user.email ?? "",
-				isGuestUser: session.user.isGuest,
-				isGoogleUser: session.user.isGoogleUser,
-				needsName: !session.user.isGuest && !session.user.name && !session.user.isGoogleUser,
-			}}>
-			{children}
-		</AppShell>
+		<>
+			<AppShell
+				initialShell={{
+					workspaceName: workspace?.name ?? "Workspace",
+					userName: session.user.name,
+					userEmail: session.user.email ?? "",
+					isGuestUser: session.user.isGuest,
+					isGoogleUser: session.user.isGoogleUser,
+					needsName: !session.user.isGuest && !session.user.name && !session.user.isGoogleUser,
+				}}>
+				{children}
+			</AppShell>
+		</>
   );
 }

@@ -7,6 +7,9 @@ interface WorkspaceState {
 	expandedFolders: Set<string>;
 	sidebarWidth: number;
 	isSidebarOpen: boolean;
+	isFocusMode: boolean;
+	isAiPanelOpen: boolean;
+	aiPanelWidth: number;
 }
 
 type WorkspaceAction =
@@ -14,13 +17,20 @@ type WorkspaceAction =
 	| { type: "TOGGLE_FOLDER"; folderId: string }
 	| { type: "SET_SIDEBAR_WIDTH"; width: number }
 	| { type: "TOGGLE_SIDEBAR" }
-	| { type: "SET_SIDEBAR_OPEN"; isOpen: boolean };
+	| { type: "SET_SIDEBAR_OPEN"; isOpen: boolean }
+	| { type: "TOGGLE_FOCUS_MODE" }
+	| { type: "SET_FOCUS_MODE"; isFocusMode: boolean }
+	| { type: "SET_AI_PANEL_OPEN"; isOpen: boolean }
+	| { type: "SET_AI_PANEL_WIDTH"; width: number };
 
 const initialState: WorkspaceState = {
 	activeNoteId: null,
 	expandedFolders: new Set<string>(),
 	sidebarWidth: 240,
 	isSidebarOpen: true,
+	isFocusMode: false,
+	isAiPanelOpen: false,
+	aiPanelWidth: 360,
 };
 
 function workspaceReducer(
@@ -28,25 +38,33 @@ function workspaceReducer(
   action: WorkspaceAction
 ): WorkspaceState {
   switch (action.type) {
-    case "SET_ACTIVE_NOTE":
-      return { ...state, activeNoteId: action.noteId }
-    case "TOGGLE_FOLDER": {
-      const next = new Set(state.expandedFolders)
-      if (next.has(action.folderId)) {
-        next.delete(action.folderId)
-      } else {
-        next.add(action.folderId)
-      }
-      return { ...state, expandedFolders: next }
-    }
-    case "SET_SIDEBAR_WIDTH":
-      return { ...state, sidebarWidth: action.width }
-    case "TOGGLE_SIDEBAR":
-      return { ...state, isSidebarOpen: !state.isSidebarOpen };
-    case "SET_SIDEBAR_OPEN":
-      return { ...state, isSidebarOpen: action.isOpen };
-    default:
-      return state
+		case "SET_ACTIVE_NOTE":
+			return { ...state, activeNoteId: action.noteId };
+		case "TOGGLE_FOLDER": {
+			const next = new Set(state.expandedFolders);
+			if (next.has(action.folderId)) {
+				next.delete(action.folderId);
+			} else {
+				next.add(action.folderId);
+			}
+			return { ...state, expandedFolders: next };
+		}
+		case "SET_SIDEBAR_WIDTH":
+			return { ...state, sidebarWidth: action.width };
+		case "TOGGLE_SIDEBAR":
+			return { ...state, isSidebarOpen: !state.isSidebarOpen };
+		case "SET_SIDEBAR_OPEN":
+			return { ...state, isSidebarOpen: action.isOpen };
+		case "TOGGLE_FOCUS_MODE":
+			return { ...state, isFocusMode: !state.isFocusMode };
+		case "SET_FOCUS_MODE":
+			return { ...state, isFocusMode: action.isFocusMode };
+		case "SET_AI_PANEL_OPEN":
+			return { ...state, isAiPanelOpen: action.isOpen };
+		case "SET_AI_PANEL_WIDTH":
+			return { ...state, aiPanelWidth: action.width };
+		default:
+			return state;
   }
 }
 
@@ -57,6 +75,10 @@ interface WorkspaceContextValue {
 	setSidebarWidth: (width: number) => void;
 	toggleSidebar: () => void;
 	setSidebarOpen: (isOpen: boolean) => void;
+	toggleFocusMode: () => void;
+	setFocusMode: (isFocusMode: boolean) => void;
+	setAiPanelOpen: (isOpen: boolean) => void;
+	setWorkspaceAiPanelWidth: (width: number) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
@@ -85,6 +107,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   const setSidebarOpen = useCallback((isOpen: boolean) => dispatch({ type: "SET_SIDEBAR_OPEN", isOpen }), []);
+  const toggleFocusMode = useCallback(() => dispatch({ type: "TOGGLE_FOCUS_MODE" }), []);
+  const setFocusMode = useCallback((isFocusMode: boolean) => dispatch({ type: "SET_FOCUS_MODE", isFocusMode }), []);
+  const setAiPanelOpen = useCallback((isOpen: boolean) => dispatch({ type: "SET_AI_PANEL_OPEN", isOpen }), []);
+  const setWorkspaceAiPanelWidth = useCallback((width: number) => dispatch({ type: "SET_AI_PANEL_WIDTH", width }), []);
 
   // Auto-close/open sidebar based on viewport width (client-only)
   useEffect(() => {
@@ -98,7 +124,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-		<WorkspaceContext.Provider value={{ state, setActiveNote, toggleFolder, setSidebarWidth, toggleSidebar, setSidebarOpen }}>
+		<WorkspaceContext.Provider
+			value={{
+				state,
+				setActiveNote,
+				toggleFolder,
+				setSidebarWidth,
+				toggleSidebar,
+				setSidebarOpen,
+				toggleFocusMode,
+				setFocusMode,
+				setAiPanelOpen,
+				setWorkspaceAiPanelWidth,
+			}}>
 			{children}
 		</WorkspaceContext.Provider>
   );

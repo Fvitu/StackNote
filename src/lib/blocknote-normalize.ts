@@ -1,4 +1,5 @@
 import { normalizeCodeLanguage } from "@/lib/code-language"
+import { buildFileAccessUrl } from "@/lib/file-url";
 
 type UnknownRecord = Record<string, unknown>
 
@@ -36,32 +37,67 @@ function inlineToText(value: unknown): string {
   return parts.join("")
 }
 
+function normalizeFileBackedMediaBlock(block: UnknownRecord): UnknownRecord {
+	const type = block.type;
+	if (type !== "imageMedia" && type !== "pdfMedia" && type !== "audioMedia") {
+		return block;
+	}
+
+	const props = toRecord(block.props);
+	if (!props || typeof props.fileId !== "string" || props.fileId.length === 0) {
+		return block;
+	}
+
+	const stableUrl = buildFileAccessUrl(props.fileId);
+	if (props.url === stableUrl) {
+		return block;
+	}
+
+	return {
+		...block,
+		props: {
+			...props,
+			url: stableUrl,
+		},
+	};
+}
+
 function normalizeSingleBlock(block: unknown): unknown {
   const obj = toRecord(block)
   if (!obj) return block
 
-  const type = obj.type
-  if (type !== "codeBlock") return block
+  const normalizedChildren = Array.isArray(obj.children) ? obj.children.map((child) => normalizeSingleBlock(child)) : obj.children;
 
-  const props = toRecord(obj.props) ?? {}
-  const code =
-    typeof props.code === "string"
-      ? props.code
-      : inlineToText(obj.content)
+  let nextBlock: UnknownRecord = obj;
 
-  return {
-    ...obj,
-    type: "codeBlock",
-    content: undefined,
-    props: {
-      ...props,
-      code,
-      language: normalizeCodeLanguage(typeof props.language === "string" ? props.language : "typescript"),
-      showLineNumbers:
-        typeof props.showLineNumbers === "boolean" ? props.showLineNumbers : true,
-      filename: typeof props.filename === "string" ? props.filename : "",
-    },
+  if (obj.type === "codeBlock") {
+		const props = toRecord(obj.props) ?? {};
+		const code = typeof props.code === "string" ? props.code : inlineToText(obj.content);
+
+		nextBlock = {
+			...obj,
+			type: "codeBlock",
+			content: undefined,
+			props: {
+				...props,
+				code,
+				language: normalizeCodeLanguage(typeof props.language === "string" ? props.language : "typescript"),
+				showLineNumbers: typeof props.showLineNumbers === "boolean" ? props.showLineNumbers : true,
+				filename: typeof props.filename === "string" ? props.filename : "",
+			},
+		};
   }
+
+  nextBlock = normalizeFileBackedMediaBlock(nextBlock);
+
+  if (normalizedChildren !== nextBlock.children) {
+		nextBlock = {
+			...nextBlock,
+			children: normalizedChildren,
+		};
+  }
+
+  return nextBlock;
 }
 
 export function normalizeBlockNoteContent(content: unknown): unknown {

@@ -3,6 +3,7 @@ import { nanoid } from "nanoid"
 import { Prisma } from "@/generated/prisma/client"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { buildFileAccessUrl } from "@/lib/file-url";
 import { getFileExtension } from "@/lib/media"
 import { createAdminClient } from "@/lib/supabase/server"
 import { isValidHttpUrl, parseNoteCoverMeta, type NoteCoverMeta } from "@/lib/note-cover"
@@ -126,32 +127,29 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: uploadError.message }, { status: 500 })
   }
 
-  const { data: signedData, error: signedError } = await supabase.storage
-    .from(BUCKET_NAME)
-    .createSignedUrl(filePath, 60 * 60 * 24 * 7)
-
-  if (signedError || !signedData?.signedUrl) {
-    await supabase.storage.from(BUCKET_NAME).remove([filePath]).catch(() => undefined)
-    return NextResponse.json({ error: signedError?.message ?? "Failed to create signed URL" }, { status: 500 })
-  }
-
   let savedFileId: string | null = null
 
   try {
     const savedFile = await prisma.file.create({
-      data: {
-        noteId: id,
-        userId: session.user.id,
-        name: file.name,
-        type: "image",
-        mimeType: file.type,
-        size: file.size,
-        path: filePath,
-        url: signedData.signedUrl,
-      },
-    })
+		data: {
+			noteId: id,
+			userId: session.user.id,
+			name: file.name,
+			type: "image",
+			mimeType: file.type,
+			size: file.size,
+			path: filePath,
+			url: "",
+		},
+	});
 
     savedFileId = savedFile.id
+    const stableUrl = buildFileAccessUrl(savedFile.id);
+
+	await prisma.file.update({
+		where: { id: savedFile.id },
+		data: { url: stableUrl },
+	});
 
     const nextCoverMeta: NoteCoverMeta = {
       source: "upload",
@@ -165,12 +163,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const updated = await prisma.note.update({
-      where: { id },
-      data: {
-        coverImage: signedData.signedUrl,
-        coverImageMeta: serializeCoverMeta(nextCoverMeta),
-      },
-    })
+		where: { id },
+		data: {
+			coverImage: stableUrl,
+			coverImageMeta: serializeCoverMeta(nextCoverMeta),
+		},
+	});
 
     if (previousCoverMeta?.source === "upload" && previousCoverMeta.fileId !== savedFile.id) {
       await cleanupUploadedCover(previousCoverMeta)

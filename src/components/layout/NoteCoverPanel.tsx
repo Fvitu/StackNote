@@ -30,6 +30,7 @@ interface NoteCoverPanelProps {
 	coverImage: string | null;
 	coverImageMeta: unknown;
 	onCoverUpdated: (payload: CoverUpdateResponse) => void;
+	disabled?: boolean;
 }
 
 const COVER_TABS: Array<{ id: CoverTab; label: string; icon: typeof Sparkles }> = [
@@ -134,7 +135,7 @@ async function parseCoverResponse(response: Response): Promise<CoverUpdateRespon
 	return payload as CoverUpdateResponse;
 }
 
-export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpdated }: NoteCoverPanelProps) {
+export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpdated, disabled = false }: NoteCoverPanelProps) {
 	const [isDialogOpen, setIsDialogOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState<CoverTab>("gallery");
 	const [searchQuery, setSearchQuery] = useState("");
@@ -396,7 +397,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 
 	const handleCoverMouseDown = useCallback(
 		(event: ReactMouseEvent<HTMLDivElement>) => {
-			if (!isPositioning) {
+			if (!isPositioning || disabled) {
 				return;
 			}
 
@@ -408,12 +409,12 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 			event.preventDefault();
 			dragStartRef.current = { y: event.clientY, startCoverY: draftPosition.y };
 		},
-		[draftPosition.y, isPositioning],
+		[draftPosition.y, disabled, isPositioning],
 	);
 
 	const handleCoverTouchStart = useCallback(
 		(event: ReactTouchEvent<HTMLDivElement>) => {
-			if (!isPositioning) {
+			if (!isPositioning || disabled) {
 				return;
 			}
 
@@ -429,7 +430,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 
 			dragStartRef.current = { y: touch.clientY, startCoverY: draftPosition.y };
 		},
-		[draftPosition.y, isPositioning],
+		[draftPosition.y, disabled, isPositioning],
 	);
 
 	useEffect(() => {
@@ -496,7 +497,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 	}, [isDraggingPosition, isPositioning, updateDraftPositionByDragDelta]);
 
 	const handleSavePosition = async () => {
-		if (!coverImage) {
+		if (!coverImage || disabled) {
 			return;
 		}
 
@@ -522,6 +523,10 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 	};
 
 	const handleUploadClick = () => {
+		if (disabled) {
+			return;
+		}
+
 		uploadInputRef.current?.click();
 	};
 
@@ -556,6 +561,10 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 	};
 
 	const handleRemoveCover = async () => {
+		if (disabled) {
+			return;
+		}
+
 		setIsRemoving(true);
 		setActionError(null);
 
@@ -625,6 +634,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 									<button
 										type="button"
 										onClick={() => setDraftPosition({ x: 50, y: 50 })}
+										disabled={disabled}
 										className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-sm"
 										style={{
 											borderColor: "rgba(255,255,255,0.18)",
@@ -637,7 +647,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 									<button
 										type="button"
 										onClick={() => void handleSavePosition()}
-										disabled={isApplying}
+										disabled={isApplying || disabled}
 										className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-sm disabled:opacity-60"
 										style={{
 											borderColor: "rgba(255,255,255,0.18)",
@@ -653,6 +663,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 											setDraftPosition(currentCoverPosition);
 											setIsPositioning(false);
 										}}
+										disabled={disabled}
 										className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-sm"
 										style={{
 											borderColor: "rgba(255,255,255,0.18)",
@@ -670,6 +681,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 										setDraftPosition(currentCoverPosition);
 										setIsPositioning(true);
 									}}
+									disabled={disabled}
 									className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-sm"
 									style={{
 										borderColor: "rgba(255,255,255,0.18)",
@@ -684,6 +696,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 							<button
 								type="button"
 								onClick={() => setIsDialogOpen(true)}
+								disabled={disabled}
 								className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-sm"
 								style={{
 									borderColor: "rgba(255,255,255,0.18)",
@@ -697,7 +710,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 							<button
 								type="button"
 								onClick={() => void handleRemoveCover()}
-								disabled={isApplying || isRemoving}
+								disabled={isApplying || isRemoving || disabled}
 								className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-sm disabled:opacity-60"
 								style={{
 									borderColor: "rgba(255,255,255,0.18)",
@@ -766,6 +779,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 										<button
 											key={tab.id}
 											type="button"
+											disabled={disabled}
 											onClick={() => {
 												setActiveTab(tab.id);
 												setActionError(null);
@@ -786,7 +800,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 									<button
 										type="button"
 										onClick={() => void handleRemoveCover()}
-										disabled={isApplying || isRemoving}
+											disabled={isApplying || isRemoving || disabled}
 										className="ml-auto inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm disabled:opacity-60"
 										style={{
 											color: "#f5b7b1",
@@ -812,6 +826,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 											<Input
 												value={searchQuery}
 												onChange={(event) => setSearchQuery(event.target.value)}
+												disabled={disabled}
 												placeholder="Search for a cover image..."
 												className="h-10 pl-9"
 											/>
@@ -821,6 +836,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 												<button
 													key={query}
 													type="button"
+													disabled={disabled}
 													onClick={() => setSearchQuery(query)}
 													className="rounded-full px-3 py-1.5 text-xs"
 													style={{
@@ -870,7 +886,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 															key={photo.id}
 															type="button"
 															onClick={() => void handleUnsplashSelect(photo)}
-															disabled={isApplying}
+															disabled={isApplying || disabled}
 															className="group overflow-hidden rounded-[24px] border text-left disabled:opacity-60"
 															style={{
 																borderColor:
@@ -980,7 +996,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 											Pick any image you want and we will attach it directly to this note.
 										</p>
 										<div className="mt-5">
-											<Button onClick={handleUploadClick} disabled={isApplying} className="h-9 px-4">
+											<Button onClick={handleUploadClick} disabled={isApplying || disabled} className="h-9 px-4">
 												{isApplying ? (
 													<>
 														<Loader2 className="h-4 w-4 animate-spin" />
@@ -1020,10 +1036,11 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 											<Input
 												value={linkUrl}
 												onChange={(event) => setLinkUrl(event.target.value)}
+												disabled={disabled}
 												placeholder="https://example.com/cover.jpg"
 												className="h-10"
 											/>
-											<Button onClick={() => void handleLinkApply()} disabled={isApplying} className="h-10 px-4 sm:min-w-32">
+											<Button onClick={() => void handleLinkApply()} disabled={isApplying || disabled} className="h-10 px-4 sm:min-w-32">
 												{isApplying ? (
 													<>
 														<Loader2 className="h-4 w-4 animate-spin" />

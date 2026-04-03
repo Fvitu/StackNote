@@ -3,16 +3,19 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, CheckSquare, Layers, Plus, Search, Send, Square, Sparkles, Trash2, X } from "lucide-react";
+import { BrainCircuit, ChevronLeft, CheckSquare, Layers, Plus, Search, Send, Square, Sparkles, Trash2, X } from "lucide-react";
 import { ChatMessage, type Message } from "./ChatMessage";
 import { ModelSelector } from "./ModelSelector";
 import { SuggestedPrompts } from "./SuggestedPrompts";
 import { UsageIndicator } from "./UsageIndicator";
+import { AIPanelSkeleton } from "./AIPanelSkeleton";
 import type { FlashcardDeckPayload } from "@/components/flashcards/types";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DEFAULT_TEXT_MODEL, isValidTextModel, type TextModelId } from "@/lib/groq-models";
 import { noteContentToText } from "@/lib/ai/note-content";
 import { parseFlashcardDeckMessage } from "@/lib/flashcard-chat-message";
+import { parseQuizHistoryMessage } from "@/lib/quiz-chat-message";
+import type { QuizQuestion } from "@/lib/quiz";
 import { fetchJson } from "@/lib/api-client";
 import { readErrorMessage, readJsonResponse } from "@/lib/http";
 import { notifyAiUsageChanged } from "@/lib/ai-usage-events";
@@ -96,6 +99,29 @@ const GenerateFlashcardsDialogClient = dynamic(
 	},
 );
 
+const QuizGeneratorDialogClient = dynamic(() => import("./QuizGeneratorDialog").then((module) => module.QuizGeneratorDialog), {
+	ssr: false,
+	loading: () => (
+		<Dialog open>
+			<DialogContent showCloseButton={false} className="sm:max-w-lg">
+				<DialogHeader>
+					<DialogTitle>Generate quiz</DialogTitle>
+					<DialogDescription>Preparing the quiz generator…</DialogDescription>
+				</DialogHeader>
+				<div className="space-y-3">
+					<div className="stacknote-skeleton h-10 rounded-[10px]" />
+					<div className="stacknote-skeleton h-10 rounded-[10px]" />
+					<div className="stacknote-skeleton h-24 rounded-[14px]" />
+				</div>
+			</DialogContent>
+		</Dialog>
+	),
+});
+
+const QuizGameClient = dynamic(() => import("./QuizGame").then((module) => module.QuizGame), {
+	ssr: false,
+});
+
 type ContextSelectionMode = "current" | "all" | "manual";
 
 function readStoredActiveSessionId(workspaceId: string) {
@@ -167,6 +193,7 @@ function normalizeSelection(selectedNoteIds: string[], availableNotes: ContextNo
 
 function hydrateChatMessage(message: { id: string; role: "user" | "assistant"; content: string; timestamp: string; model?: string }): Message {
 	const flashcardDeck = message.role === "assistant" ? parseFlashcardDeckMessage(message.content) : null;
+	const quizHistory = message.role === "assistant" ? parseQuizHistoryMessage(message.content) : null;
 	return {
 		id: message.id,
 		role: message.role,
@@ -174,6 +201,7 @@ function hydrateChatMessage(message: { id: string; role: "user" | "assistant"; c
 		timestamp: new Date(message.timestamp),
 		model: message.model,
 		flashcardDeck: flashcardDeck ?? undefined,
+		quizHistory: quizHistory ?? undefined,
 	};
 }
 
@@ -201,6 +229,10 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 	const [isDeletingSession, setIsDeletingSession] = useState(false);
 	const [contextSelectionMode, setContextSelectionMode] = useState<ContextSelectionMode>("current");
 	const [isFlashcardDialogOpen, setIsFlashcardDialogOpen] = useState(false);
+	const [isQuizDialogOpen, setIsQuizDialogOpen] = useState(false);
+	const [quizSelectionText, setQuizSelectionText] = useState("");
+	const [activeQuizQuestions, setActiveQuizQuestions] = useState<QuizQuestion[] | null>(null);
+	const [hasResolvedInitialSessionLoad, setHasResolvedInitialSessionLoad] = useState(false);
 
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -504,6 +536,19 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 	const selectedCount = selectedNoteIds.length;
 	const activeSession = useMemo(() => sessions.find((session) => session.id === activeSessionId) ?? null, [activeSessionId, sessions]);
 	const isConversationLocked = isLoading || isSessionsLoading || isSessionLoading || isCreatingSession;
+	const isInitialSessionHydrationPending = useMemo(() => {
+		if (isSessionsLoading) return true;
+		if (sessions.length > 0 && !activeSessionId) return true;
+		if (!activeSessionId) return false;
+		if (isSessionLoading) return true;
+		return messagesSessionIdRef.current !== activeSessionId;
+	}, [activeSessionId, isSessionLoading, isSessionsLoading, sessions.length]);
+
+	useEffect(() => {
+		if (hasResolvedInitialSessionLoad) return;
+		if (isInitialSessionHydrationPending) return;
+		setHasResolvedInitialSessionLoad(true);
+	}, [hasResolvedInitialSessionLoad, isInitialSessionHydrationPending]);
 
 	useEffect(() => {
 		const sessionId = messagesSessionIdRef.current;
@@ -640,6 +685,53 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 		}
 	}, [activeSessionId, createSession, isConversationLocked, noteId, noteTitle, selectedNoteIds]);
 
+	const handleOpenQuizDialog = useCallback(async () => {
+		if (isConversationLocked) return;
+
+		try {
+			if (!activeSessionId) {
+				const createdSession = await createSession(selectedNoteIds.length > 0 ? selectedNoteIds : [noteId], noteTitle);
+				messagesSessionIdRef.current = createdSession.id;
+			}
+
+			setQuizSelectionText(typeof window === "undefined" ? "" : (window.getSelection?.()?.toString().trim() ?? ""));
+			setIsQuizDialogOpen(true);
+		} catch (sessionError) {
+			setError(sessionError instanceof Error ? sessionError.message : "Failed to prepare quiz session");
+		}
+	}, [activeSessionId, createSession, isConversationLocked, noteId, noteTitle, selectedNoteIds]);
+
+	const handleQuizGenerated = useCallback(
+		(questions: QuizQuestion[]) => {
+			if (questions.length === 0) {
+				setError("Quiz generation did not return any questions");
+				return;
+			}
+
+			notifyAiUsageChanged();
+			if (!activeSessionId) {
+				return;
+			}
+
+			sessionStateCacheRef.current.delete(activeSessionId);
+			void loadSessionDetails(activeSessionId).catch((sessionError) => {
+				setError(sessionError instanceof Error ? sessionError.message : "Failed to refresh quiz history");
+			});
+		},
+		[activeSessionId, loadSessionDetails],
+	);
+
+	const handleOpenQuizFromHistory = useCallback((questions: QuizQuestion[]) => {
+		setActiveQuizQuestions(questions);
+	}, []);
+
+	const handleExitQuiz = useCallback(() => {
+		setActiveQuizQuestions(null);
+		if (activeSessionId) {
+			void loadSessionDetails(activeSessionId);
+		}
+	}, [activeSessionId, loadSessionDetails]);
+
 	const handleSubmit = useCallback(
 		async (prompt?: string) => {
 			const content = prompt || input;
@@ -713,10 +805,14 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 	const isContextModeButtonDisabled = isConversationLocked;
 	const baseViewClassName = `flex h-full min-h-0 flex-col`;
 
+	if (!hasResolvedInitialSessionLoad) {
+		return <AIPanelSkeleton />;
+	}
+
 	return (
-					<div
-						className={`relative flex h-full w-full min-w-0 flex-col overflow-hidden border-l`}
-						style={{ backgroundColor: "var(--bg-sidebar)", borderColor: "var(--border-default)" }}>
+		<div
+			className={`relative flex h-full w-full min-w-0 flex-col overflow-hidden border-l`}
+			style={{ backgroundColor: "var(--bg-sidebar)", borderColor: "var(--border-default)" }}>
 			<div className={baseViewClassName}>
 				<div className="flex h-12 shrink-0 items-center justify-between border-b px-3" style={{ borderColor: "var(--border-default)" }}>
 					<div className="flex items-center gap-2">
@@ -866,79 +962,113 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 					</DialogContent>
 				</Dialog>
 
-				<div className="flex-1 overflow-y-auto p-3">
-					{messages.length === 0 ? (
-						<SuggestedPrompts onSelect={handleSubmit} noteTitle={noteTitle} />
-					) : (
-						<div className="space-y-3">
-							{messages.map((message, index) => (
-								<ChatMessage
-									key={message.id}
-									message={message}
-									onAppendToNote={onAppendToNote}
-									isStreaming={isLoading && index === messages.length - 1 && message.role === "assistant"}
+				{activeQuizQuestions ? (
+					<div className="flex-1 overflow-hidden">
+						<QuizGameClient title={noteTitle} questions={activeQuizQuestions} onExit={handleExitQuiz} />
+					</div>
+				) : (
+					<>
+						<div className="flex-1 overflow-y-auto p-3">
+							{messages.length === 0 ? (
+								<SuggestedPrompts onSelect={handleSubmit} noteTitle={noteTitle} />
+							) : (
+								<div className="space-y-3">
+									{messages.map((message, index) => (
+										<ChatMessage
+											key={message.id}
+											message={message}
+											onAppendToNote={onAppendToNote}
+											onOpenQuiz={message.role === "assistant" ? handleOpenQuizFromHistory : undefined}
+											isStreaming={isLoading && index === messages.length - 1 && message.role === "assistant"}
+										/>
+									))}
+								</div>
+							)}
+							{error && (
+								<div className="mt-3 rounded-md p-3 text-sm" style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", color: "#ef4444" }}>
+									{error}
+								</div>
+							)}
+							<div ref={messagesEndRef} />
+						</div>
+
+						<div className="border-t p-3" style={{ borderColor: "var(--border-default)" }}>
+							<div className="mb-2 flex items-center justify-between gap-2">
+								<div className="flex items-center gap-2">
+									<button
+										type="button"
+										onClick={() => void handleOpenFlashcardDialog()}
+										disabled={isConversationLocked}
+										className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors hover:bg-[#1a1a1a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c8c8c] disabled:cursor-not-allowed disabled:opacity-50"
+										style={{ borderColor: "var(--border-default)", color: "var(--text-secondary)" }}>
+										<Layers className="h-3.5 w-3.5" />
+										Flashcards
+									</button>
+									<button
+										type="button"
+										onClick={() => void handleOpenQuizDialog()}
+										disabled={isConversationLocked}
+										className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors hover:bg-[#1a1a1a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c8c8c] disabled:cursor-not-allowed disabled:opacity-50"
+										style={{ borderColor: "var(--border-default)", color: "var(--text-secondary)" }}>
+										<BrainCircuit className="h-3.5 w-3.5" />
+										Quiz
+									</button>
+								</div>
+							</div>
+							<div className="flex gap-2">
+								<textarea
+									ref={inputRef}
+									value={input}
+									onChange={(event) => setInput(event.target.value)}
+									onKeyDown={handleKeyDown}
+									placeholder="Ask AI anything..."
+									rows={1}
+									className="flex-1 resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1"
+									style={{ borderColor: "var(--border-default)", color: "var(--text-primary)", minHeight: "38px" }}
+									disabled={isConversationLocked}
 								/>
-							))}
+								<button
+									onClick={() => void handleSubmit()}
+									disabled={!input.trim() || isConversationLocked}
+									className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-md transition-opacity disabled:opacity-40"
+									style={{ backgroundColor: "var(--sn-accent)" }}>
+									<Send className="h-4 w-4 text-white" />
+								</button>
+							</div>
+							<p className="mt-2 text-center text-xs" style={{ color: "var(--text-tertiary)" }}>
+								AI responses can make mistakes. Please double-check them.
+							</p>
 						</div>
-					)}
-					{error && (
-						<div className="mt-3 rounded-md p-3 text-sm" style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", color: "#ef4444" }}>
-							{error}
-						</div>
-					)}
-					<div ref={messagesEndRef} />
-				</div>
+					</>
+				)}
 
-				<div className="border-t p-3" style={{ borderColor: "var(--border-default)" }}>
-					<div className="mb-2 flex items-center justify-between gap-2">
-						<button
-							type="button"
-							onClick={() => void handleOpenFlashcardDialog()}
-							disabled={isConversationLocked}
-							className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors hover:bg-[#1a1a1a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8c8c8c] disabled:cursor-not-allowed disabled:opacity-50"
-							style={{ borderColor: "var(--border-default)", color: "var(--text-secondary)" }}>
-							<Layers className="h-3.5 w-3.5" />
-							Flashcards
-						</button>
-					</div>
-					<div className="flex gap-2">
-						<textarea
-							ref={inputRef}
-							value={input}
-							onChange={(event) => setInput(event.target.value)}
-							onKeyDown={handleKeyDown}
-							placeholder="Ask AI anything..."
-							rows={1}
-							className="flex-1 resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1"
-							style={{ borderColor: "var(--border-default)", color: "var(--text-primary)", minHeight: "38px" }}
-							disabled={isConversationLocked}
-						/>
-						<button
-							onClick={() => void handleSubmit()}
-							disabled={!input.trim() || isConversationLocked}
-							className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-md transition-opacity disabled:opacity-40"
-							style={{ backgroundColor: "var(--sn-accent)" }}>
-							<Send className="h-4 w-4 text-white" />
-						</button>
-					</div>
-					<p className="mt-2 text-center text-xs" style={{ color: "var(--text-tertiary)" }}>
-						AI responses can make mistakes. Please double-check them.
-					</p>
-				</div>
-
-				<GenerateFlashcardsDialogClient
-					open={isFlashcardDialogOpen}
-					onClose={() => setIsFlashcardDialogOpen(false)}
-					onGenerated={handleFlashcardsGenerated}
-					defaultText={defaultFlashcardSourceText}
-					defaultTitle={noteTitle}
-					noteId={noteId}
-					sessionId={activeSessionId ?? undefined}
-				/>
+				{isFlashcardDialogOpen ? (
+					<GenerateFlashcardsDialogClient
+						open={isFlashcardDialogOpen}
+						onClose={() => setIsFlashcardDialogOpen(false)}
+						onGenerated={handleFlashcardsGenerated}
+						defaultText={defaultFlashcardSourceText}
+						defaultTitle={noteTitle}
+						noteId={noteId}
+						sessionId={activeSessionId ?? undefined}
+					/>
+				) : null}
+				{isQuizDialogOpen ? (
+					<QuizGeneratorDialogClient
+						open={isQuizDialogOpen}
+						onClose={() => setIsQuizDialogOpen(false)}
+						onGenerated={handleQuizGenerated}
+						model={model}
+						noteTitle={noteTitle}
+						currentNoteText={defaultFlashcardSourceText}
+						selectionText={quizSelectionText}
+						sessionId={activeSessionId ?? undefined}
+						noteId={noteId}
+					/>
+				) : null}
 			</div>
 
-			<div
-				className={`absolute inset-0 z-30 flex flex-col bg-[var(--bg-sidebar)] ${isChatHistoryOpen ? "pointer-events-auto" : "hidden"}`}>
+			<div className={`absolute inset-0 z-30 flex flex-col bg-[var(--bg-sidebar)] ${isChatHistoryOpen ? "pointer-events-auto" : "hidden"}`}>
 				<div className="flex h-12 shrink-0 items-center justify-between border-b px-3" style={{ borderColor: "var(--border-default)" }}>
 					<div className="flex min-w-0 items-center gap-2">
 						<button

@@ -15,6 +15,7 @@ const PLATFORM_LABELS: Record<string, string> = {
 
 const MIN_WIDTH_PERCENT = 35
 const MAX_WIDTH_PERCENT = 100
+const NOTE_CONTENT_COMMIT_EVENT = "stacknote:commit-note-content";
 
 type ResizeState = {
   direction: "left" | "right"
@@ -93,6 +94,7 @@ export const videoEmbedBlockSpec = createReactBlockSpec(
           resizeStateRef.current = null
           document.body.style.cursor = ""
           document.body.style.userSelect = ""
+          window.dispatchEvent(new Event(NOTE_CONTENT_COMMIT_EVENT));
         }
 
         window.addEventListener("pointermove", handlePointerMove)
@@ -160,56 +162,49 @@ export const videoEmbedBlockSpec = createReactBlockSpec(
       }
 
       return (
-        <BlockContentWrapper
-          blockType={props.block.type}
-          blockProps={props.block.props}
-          propSchema={props.editor.schema.blockSchema.videoEmbed.propSchema}
-        >
-          <div ref={wrapperRef} className="relative" style={wrapperStyle}>
-            <div className="overflow-hidden rounded-[var(--sn-radius-lg)] border" style={{ borderColor: "var(--border-default)" }}>
-              <div className="relative w-full" style={{ paddingTop: "56.25%" }}>
-                <iframe
-                  src={src}
-                  title={props.block.props.title || "Embedded video"}
-                  className="absolute inset-0 h-full w-full"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              </div>
-              <div
-                className="absolute right-2 top-2 rounded-[var(--sn-radius-sm)] border px-2 py-0.5 text-[11px]"
-                style={{
-                  borderColor: "var(--border-strong)",
-                  backgroundColor: "rgba(10,10,10,0.8)",
-                  color: "var(--text-secondary)",
-                }}
-              >
-                {PLATFORM_LABELS[props.block.props.platform] ?? "Embed"}
-              </div>
-            </div>
+			<BlockContentWrapper blockType={props.block.type} blockProps={props.block.props} propSchema={props.editor.schema.blockSchema.videoEmbed.propSchema}>
+				<div ref={wrapperRef} className="relative" style={wrapperStyle}>
+					<div className="overflow-hidden rounded-[var(--sn-radius-lg)] border" style={{ borderColor: "var(--border-default)" }}>
+						<div className="relative w-full" style={{ paddingTop: "56.25%" }}>
+							<iframe
+								src={src}
+								title={props.block.props.title || "Embedded video"}
+								className="absolute inset-0 h-full w-full"
+								allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+							/>
+						</div>
+						<div
+							className="absolute right-2 top-2 rounded-[var(--sn-radius-sm)] border px-2 py-0.5 text-[11px]"
+							style={{
+								borderColor: "var(--border-strong)",
+								backgroundColor: "rgba(10,10,10,0.8)",
+								color: "var(--text-secondary)",
+							}}>
+							{PLATFORM_LABELS[props.block.props.platform] ?? "Embed"}
+						</div>
+					</div>
 
-            {(["left", "right"] as const).map((direction) => (
-              <button
-                key={direction}
-                type="button"
-                onPointerDown={handleResizeStart(direction)}
-                className={`absolute inset-y-3 z-10 flex w-5 items-center justify-center ${direction === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"}`}
-                style={{ cursor: "ew-resize", touchAction: "none" }}
-                aria-label={`Resize embedded video from the ${direction} edge`}
-                title="Drag edge to resize"
-              >
-                <span
-                  className="h-12 w-1.5 rounded-full border transition-colors"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.12)",
-                    backgroundColor: "rgba(10,10,10,0.82)",
-                  }}
-                />
-              </button>
-            ))}
-          </div>
-        </BlockContentWrapper>
-      )
+					{(["left", "right"] as const).map((direction) => (
+						<button
+							key={direction}
+							type="button"
+							onPointerDown={handleResizeStart(direction)}
+							className={`absolute inset-y-3 z-10 flex w-5 items-center justify-center ${direction === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"}`}
+							style={{ cursor: "ew-resize", touchAction: "none" }}
+							aria-label={`Resize embedded video from the ${direction} edge`}
+							title="Drag edge to resize">
+							<span
+								className="h-12 w-1.5 rounded-full border transition-colors"
+								style={{
+									borderColor: "rgba(255,255,255,0.12)",
+									backgroundColor: "rgba(10,10,10,0.82)",
+								}}
+							/>
+						</button>
+					))}
+				</div>
+			</BlockContentWrapper>
+		);
     },
   },
 )

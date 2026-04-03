@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useCallback, useEffect, useRef } from "react";
+import type { ReactElement } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, ChevronDown, LogOut, User, PanelLeftClose } from "lucide-react";
+import { Plus, Search, ChevronDown, LogOut, User, PanelLeftClose, CalendarDays, Settings } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { SidebarItem } from "./SidebarItem";
@@ -25,6 +28,7 @@ interface SidebarProps {
 	onRefresh: () => void;
 	onSearchOpen: () => void;
 	onAccountOpen: () => void;
+	onSettingsOpen: () => void;
 	// Optimistic action handlers
 	onCreateNote?: (folderId?: string) => OptimisticResult;
 	onCreateFolder?: (parentId?: string) => OptimisticResult;
@@ -35,6 +39,7 @@ interface SidebarProps {
 	onMoveNote?: (noteId: string, folderId: string | null) => AsyncResult;
 	onMoveFolder?: (folderId: string, parentId: string | null) => AsyncResult;
 	onFolderVisited?: (folderId: string | null) => void;
+	isSettingsOpen?: boolean;
 }
 
 export function Sidebar({
@@ -48,6 +53,8 @@ export function Sidebar({
 	onRefresh,
 	onSearchOpen,
 	onAccountOpen,
+	onSettingsOpen,
+	isSettingsOpen = false,
 	onCreateNote: onCreateNoteOptimistic,
 	onCreateFolder: onCreateFolderOptimistic,
 	onDeleteNote: onDeleteNoteOptimistic,
@@ -57,12 +64,16 @@ export function Sidebar({
 	onMoveNote: onMoveNoteOptimistic,
 	onMoveFolder: onMoveFolderOptimistic,
 	onFolderVisited,
-}: SidebarProps) {
+}: SidebarProps): ReactElement {
 	const queryClient = useQueryClient();
+	const router = useRouter();
+	const pathname = usePathname();
 	const { state, setActiveNote, toggleFolder, toggleSidebar } = useWorkspace();
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
 	const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
+	const shouldHighlightActiveNote = pathname === "/";
+	const isPlannerRoute = pathname === "/planner";
 
 	// Drag & drop state
 	const [draggedItem, setDraggedItem] = useState<{ id: string; type: "note" | "folder" } | null>(null);
@@ -79,12 +90,33 @@ export function Sidebar({
 		});
 	}, 200);
 
+	const openNoteInWorkspace = useCallback(
+		(noteId: string, folderId: string | null) => {
+			setActiveNote(noteId);
+			onFolderVisited?.(folderId);
+
+			if (pathname !== "/") {
+				const params = new URLSearchParams();
+				params.set("note", noteId);
+				if (folderId) {
+					params.set("folder", folderId);
+				}
+				router.push(`/?${params.toString()}`);
+			}
+
+			if (typeof window !== "undefined" && window.innerWidth < 768) {
+				toggleSidebar();
+			}
+		},
+		[onFolderVisited, pathname, router, setActiveNote, toggleSidebar],
+	);
+
 	const handleCreateNote = useCallback(
 		async (folderId?: string) => {
 			if (onCreateNoteOptimistic) {
 				const newNote = await onCreateNoteOptimistic(folderId);
 				if (newNote) {
-					setActiveNote(newNote.id);
+					openNoteInWorkspace(newNote.id, folderId ?? null);
 				}
 			} else {
 				// Fallback to legacy behavior
@@ -96,11 +128,11 @@ export function Sidebar({
 				if (res.ok) {
 					const note = await res.json();
 					onRefresh();
-					setActiveNote(note.id);
+					openNoteInWorkspace(note.id, folderId ?? null);
 				}
 			}
 		},
-		[workspaceId, onCreateNoteOptimistic, onRefresh, setActiveNote],
+		[workspaceId, onCreateNoteOptimistic, onRefresh, openNoteInWorkspace],
 	);
 
 	const handleCreateFolder = useCallback(
@@ -394,16 +426,10 @@ export function Sidebar({
 							type="note"
 							emoji={note.emoji}
 							depth={depth + 1}
-							isActive={state.activeNoteId === note.id}
+							isActive={shouldHighlightActiveNote && state.activeNoteId === note.id}
 							isRenaming={renamingId === note.id}
 							onMouseEnter={() => prefetchNote(note.id)}
-							onClick={() => {
-								setActiveNote(note.id);
-								onFolderVisited?.(folder.id);
-								if (typeof window !== "undefined" && window.innerWidth < 768) {
-									toggleSidebar();
-								}
-							}}
+							onClick={() => openNoteInWorkspace(note.id, folder.id)}
 							onContextMenu={handleContextMenu}
 							onRename={(name) => handleRename(note.id, "note", name)}
 							onCancelRename={() => setRenamingId(null)}
@@ -564,7 +590,7 @@ export function Sidebar({
 
 			{/* File tree */}
 			<div
-				className="flex-1 overflow-y-auto px-1 py-1"
+				className="flex-1 overflow-y-auto px-1 py-1 pb-[220px]"
 				onDragOver={(e) => {
 					if (draggedItem) {
 						e.preventDefault();
@@ -585,16 +611,10 @@ export function Sidebar({
 							type="note"
 							emoji={note.emoji}
 							depth={0}
-							isActive={state.activeNoteId === note.id}
+							isActive={shouldHighlightActiveNote && state.activeNoteId === note.id}
 							isRenaming={renamingId === note.id}
 							onMouseEnter={() => prefetchNote(note.id)}
-							onClick={() => {
-								setActiveNote(note.id);
-								onFolderVisited?.(null);
-								if (typeof window !== "undefined" && window.innerWidth < 768) {
-									toggleSidebar();
-								}
-							}}
+							onClick={() => openNoteInWorkspace(note.id, null)}
 							onContextMenu={handleContextMenu}
 							onRename={(name) => handleRename(note.id, "note", name)}
 							onCancelRename={() => setRenamingId(null)}
@@ -636,8 +656,30 @@ export function Sidebar({
 				)}
 			</div>
 
-			{/* Bottom: New folder button */}
-			<div className="p-2" style={{ borderTop: "1px solid var(--border-default)" }}>
+			{/* Bottom: Navigation + New folder button */}
+			<div className="space-y-1 p-2" style={{ borderTop: "1px solid var(--border-default)" }}>
+				<Link
+					href="/planner"
+					aria-current={isPlannerRoute ? "page" : undefined}
+					className={`inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-xs transition-colors duration-150 hover:bg-[#1a1a1a] hover:text-[#e8e8e8] ${
+						isPlannerRoute ? "bg-[rgba(255,255,255,0.08)] text-[#e8e8e8]" : ""
+					}`}
+					style={{ color: isPlannerRoute ? "#e8e8e8" : "var(--text-secondary)" }}>
+					<CalendarDays className="h-3.5 w-3.5" />
+					Planner
+				</Link>
+				<button
+					type="button"
+					onClick={onSettingsOpen}
+					data-settings-toggle="true"
+					aria-pressed={isSettingsOpen}
+					className={`inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-xs transition-colors duration-150 hover:bg-[#1a1a1a] ${
+						isSettingsOpen ? "bg-[rgba(255,255,255,0.08)] text-[#e8e8e8]" : ""
+					}`}
+					style={{ color: "var(--text-secondary)" }}>
+					<Settings className="h-3.5 w-3.5" />
+					Settings
+				</button>
 				<button
 					type="button"
 					onClick={() => handleCreateFolder()}

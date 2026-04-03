@@ -10,6 +10,7 @@ import { buildChatSessionTitle, normalizeContextNoteIds } from "@/lib/ai-chat-se
 import { parseAssistantResponseContent } from "@/lib/ai-response"
 import { noteContentToText, truncateToTokenLimit } from "@/lib/ai/note-content"
 import { parseFlashcardDeckMessage } from "@/lib/flashcard-chat-message"
+import { parseQuizHistoryMessage } from "@/lib/quiz-chat-message";
 
 export const maxDuration = 60
 
@@ -63,18 +64,36 @@ function buildContextText(contextNotes: ContextNote[]) {
   return sections ? truncateToTokenLimit(sections, AI_LIMITS.MAX_CONTEXT_TOKENS) : undefined
 }
 
+function isGeneratedQuizCommand(content: string) {
+	return /^Generate a\s+\d+\s*-?question\s+quiz\b/i.test(content.trim());
+}
+
 function sanitizeHistoryMessage(role: "user" | "assistant", content: string) {
   if (role !== "assistant") {
-    return content
+    return { content, isQuizHistory: false };
   }
 
   const flashcardDeck = parseFlashcardDeckMessage(content)
   if (flashcardDeck) {
-    return `Generated ${flashcardDeck.count} flashcards for "${flashcardDeck.title}".`
+		return {
+			content: `Generated ${flashcardDeck.count} flashcards for "${flashcardDeck.title}".`,
+			isQuizHistory: false,
+		};
+  }
+
+  const quizHistory = parseQuizHistoryMessage(content);
+  if (quizHistory) {
+		return {
+			content: null,
+			isQuizHistory: true,
+		};
   }
 
   const parsed = parseAssistantResponseContent(content)
-  return parsed.finalContent || content
+  return {
+		content: parsed.finalContent || content,
+		isQuizHistory: false,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -216,10 +235,28 @@ export async function POST(req: NextRequest) {
       content: true,
     },
   })
-  const sessionHistory = recentMessages.reverse().map((entry) => ({
-    role: entry.role as "user" | "assistant",
-    content: sanitizeHistoryMessage(entry.role as "user" | "assistant", entry.content),
-  }))
+  const sessionHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const entry of recentMessages.reverse()) {
+		const role = entry.role as "user" | "assistant";
+		const sanitized = sanitizeHistoryMessage(role, entry.content);
+
+		if (sanitized.isQuizHistory) {
+			const previous = sessionHistory[sessionHistory.length - 1];
+			if (previous?.role === "user" && isGeneratedQuizCommand(previous.content)) {
+				sessionHistory.pop();
+			}
+			continue;
+		}
+
+		if (!sanitized.content) {
+			continue;
+		}
+
+		sessionHistory.push({
+			role,
+			content: sanitized.content,
+		});
+  }
 
   // Build messages array
   const systemPrompt = buildSystemPrompt({

@@ -527,6 +527,14 @@ function getClipboardImageFiles(clipboard: DataTransfer): File[] {
 		.filter((file): file is File => file !== null);
 }
 
+function serializeContentForAutosave(content: unknown): string {
+	try {
+		return JSON.stringify(normalizeBlockNoteContent(content)) ?? "null";
+	} catch {
+		return "null";
+	}
+}
+
 interface NoteEditorProps {
 	workspaceId: string;
 	noteId: string;
@@ -701,6 +709,7 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 	const editorRootRef = useRef<HTMLDivElement | null>(null);
 	const uploadTypeRef = useRef<MediaType>("image");
 	const pendingLinkPreviewRef = useRef<Set<string>>(new Set());
+	const lastAutosaveSnapshotRef = useRef(serializeContentForAutosave(initialContent));
 	const blockSelectionKeyRef = useRef("");
 	const blockSelectionStartPointRef = useRef<Point | null>(null);
 	const blockSelectionAnchorIdRef = useRef<string | null>(null);
@@ -804,6 +813,27 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 		await onSave(targetNoteId, content);
 	}, 1500);
 
+	useEffect(() => {
+		const handleCommit = () => {
+			const content = editor.document;
+			const contentSnapshot = serializeContentForAutosave(content);
+			if (contentSnapshot === lastAutosaveSnapshotRef.current) {
+				void debouncedSave.flush();
+				return;
+			}
+
+			lastAutosaveSnapshotRef.current = contentSnapshot;
+			onContentChange?.(noteId, content);
+			debouncedSave.cancel();
+			void onSave(noteId, content);
+		};
+
+		window.addEventListener("stacknote:commit-note-content", handleCommit);
+		return () => {
+			window.removeEventListener("stacknote:commit-note-content", handleCommit);
+		};
+	}, [debouncedSave, editor, noteId, onContentChange, onSave]);
+
 	const transformUrlBlockToEmbed = useCallback(
 		async (blockId: string) => {
 			if (pendingLinkPreviewRef.current.has(blockId)) {
@@ -889,6 +919,12 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 	useEffect(() => {
 		return editor.onChange(() => {
 			const content = editor.document;
+			const contentSnapshot = serializeContentForAutosave(content);
+			if (contentSnapshot === lastAutosaveSnapshotRef.current) {
+				return;
+			}
+
+			lastAutosaveSnapshotRef.current = contentSnapshot;
 			onContentChange?.(noteId, content);
 			debouncedSave(content, noteId);
 		});

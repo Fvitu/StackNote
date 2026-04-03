@@ -59,7 +59,7 @@ export function EmojiPickerSkeleton() {
 	);
 }
 
-export function EditorSkeleton({ title }: { title?: string | null }) {
+export function EditorSkeleton() {
 	return (
 		<div className="flex flex-1 overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
 			<div className="flex flex-1 flex-col overflow-hidden">
@@ -69,8 +69,8 @@ export function EditorSkeleton({ title }: { title?: string | null }) {
 							<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
 						</button>
 						<div className="flex items-center gap-2">
-							<SkeletonLine width="120px" height={10} rounded={999} />
-							<SkeletonLine width="96px" height={10} rounded={999} />
+							<SkeletonLine width="128px" height={10} rounded={999} />
+							<SkeletonLine width="88px" height={10} rounded={999} />
 						</div>
 					</div>
 					<div className="flex items-center gap-2">
@@ -82,30 +82,71 @@ export function EditorSkeleton({ title }: { title?: string | null }) {
 				</div>
 
 				<div className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col gap-6 px-6 py-8">
+					<div className="flex justify-end">
+						<SkeletonLine width="94px" height={30} rounded={999} />
+					</div>
+
 					<div className="flex items-start gap-3">
 						<Skeleton className="h-10 w-10 rounded-[14px]" />
-						<div className="flex-1 space-y-3">
-							{title ? (
-								<div className="text-4xl font-semibold" style={{ color: "var(--text-primary)" }}>
-									{title}
-								</div>
-							) : (
-								<SkeletonLine width="40%" height={34} rounded={12} />
-							)}
-							<div className="flex gap-3">
-								<SkeletonLine width="140px" height={12} rounded={999} />
-								<SkeletonLine width="156px" height={12} rounded={999} />
+						<div className="min-w-0 flex-1">
+							<SkeletonLine width="42%" height={38} rounded={14} />
+							<div className="mt-3 flex flex-wrap gap-3">
+								<SkeletonLine width="138px" height={12} rounded={999} />
+								<SkeletonLine width="158px" height={12} rounded={999} />
 							</div>
 						</div>
 					</div>
 
-					<div className="mx-auto flex min-h-[70vh] w-full max-w-[720px] flex-col gap-4">
-						<SkeletonLine width="100%" height={22} rounded={12} />
-						<SkeletonLine width="80%" height={16} rounded={10} />
-						<SkeletonLine width="60%" height={16} rounded={10} />
-						<SkeletonLine width="75%" height={16} rounded={10} />
-						<SkeletonLine width="92%" height={16} rounded={10} />
-						<SkeletonLine width="70%" height={16} rounded={10} />
+					<div className="mx-auto flex w-full max-w-[840px] flex-1 flex-col gap-4 rounded-[28px] border border-white/5 bg-[#111111] px-6 py-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+						<SkeletonLine width="66%" height={36} rounded={14} />
+						<SkeletonLine width="93%" height={14} rounded={10} />
+						<SkeletonLine width="84%" height={14} rounded={10} />
+
+						<SkeletonLine width="49%" height={24} rounded={12} />
+						<SkeletonLine width="91%" height={14} rounded={10} />
+						<SkeletonLine width="77%" height={14} rounded={10} />
+
+						<div className="rounded-[18px] border border-white/5 bg-white/[0.02] px-4 py-4">
+							<div className="flex items-start gap-3">
+								<div className="mt-0.5 h-5 w-0.5 shrink-0 rounded-full bg-white/10" />
+								<div className="flex-1 space-y-3">
+									<SkeletonLine width="88%" height={14} rounded={10} />
+									<SkeletonLine width="64%" height={14} rounded={10} />
+								</div>
+							</div>
+						</div>
+
+						<SkeletonLine width="52%" height={22} rounded={12} />
+
+						<div className="space-y-3">
+							<div className="flex items-center gap-2">
+								<Skeleton className="h-4 w-4 rounded-[4px]" />
+								<SkeletonLine width="56%" height={14} rounded={10} />
+							</div>
+							<div className="flex items-center gap-2">
+								<Skeleton className="h-4 w-4 rounded-[4px]" />
+								<SkeletonLine width="68%" height={14} rounded={10} />
+							</div>
+							<div className="flex items-center gap-2">
+								<Skeleton className="h-4 w-4 rounded-[4px]" />
+								<SkeletonLine width="48%" height={14} rounded={10} />
+							</div>
+						</div>
+
+						<div className="space-y-3 pt-1">
+							<div className="flex items-center gap-2">
+								<Skeleton className="h-4 w-4 rounded-[4px]" />
+								<SkeletonLine width="64%" height={14} rounded={10} />
+							</div>
+							<div className="flex items-center gap-2">
+								<Skeleton className="h-4 w-4 rounded-[4px]" />
+								<SkeletonLine width="74%" height={14} rounded={10} />
+							</div>
+							<div className="flex items-center gap-2">
+								<Skeleton className="h-4 w-4 rounded-[4px]" />
+								<SkeletonLine width="58%" height={14} rounded={10} />
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>

@@ -16,6 +16,7 @@ interface NoteActionsMenuProps {
 	triggerClassName?: string;
 	align?: "start" | "center" | "end";
 	side?: "top" | "bottom" | "left" | "right";
+	disabled?: boolean;
 	onChangeIcon?: () => void;
 	onRename?: () => void;
 	onDuplicate?: () => void;
@@ -34,6 +35,7 @@ export function NoteActionsMenu({
 	triggerClassName = "flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]",
 	align = "end",
 	side = "bottom",
+	disabled = false,
 	onChangeIcon,
 	onRename,
 	onDuplicate,
@@ -55,42 +57,42 @@ export function NoteActionsMenu({
 			)}
 			<DropdownMenuContent align={align} side={side} onClick={(e) => e.stopPropagation()}>
 				{type === "note" && onChangeIcon && (
-					<DropdownMenuItem onClick={onChangeIcon}>
+					<DropdownMenuItem onClick={onChangeIcon} disabled={disabled}>
 						<Smile className="h-3.5 w-3.5" />
 						Change Icon
 					</DropdownMenuItem>
 				)}
 
 				{onRename && (
-					<DropdownMenuItem onClick={onRename}>
+					<DropdownMenuItem onClick={onRename} disabled={disabled}>
 						<Pencil className="h-3.5 w-3.5" />
 						Rename
 					</DropdownMenuItem>
 				)}
 
 				{type === "folder" && onNewNote && (
-					<DropdownMenuItem onClick={onNewNote}>
+					<DropdownMenuItem onClick={onNewNote} disabled={disabled}>
 						<FilePlus className="h-3.5 w-3.5" />
 						New Note
 					</DropdownMenuItem>
 				)}
 
 				{type === "folder" && onNewFolder && (
-					<DropdownMenuItem onClick={onNewFolder}>
+					<DropdownMenuItem onClick={onNewFolder} disabled={disabled}>
 						<FolderPlus className="h-3.5 w-3.5" />
 						New Folder
 					</DropdownMenuItem>
 				)}
 
 				{type === "note" && onDuplicate && (
-					<DropdownMenuItem onClick={onDuplicate}>
+					<DropdownMenuItem onClick={onDuplicate} disabled={disabled}>
 						<Copy className="h-3.5 w-3.5" />
 						Duplicate
 					</DropdownMenuItem>
 				)}
 
 				{type === "note" && onSaveVersion && (
-					<DropdownMenuItem onClick={onSaveVersion} disabled={saveVersionDisabled}>
+					<DropdownMenuItem onClick={onSaveVersion} disabled={disabled || saveVersionDisabled}>
 						<Save className="h-3.5 w-3.5" />
 						{saveVersionLabel}
 					</DropdownMenuItem>
@@ -99,7 +101,7 @@ export function NoteActionsMenu({
 				{onDelete && (
 					<>
 						<DropdownMenuSeparator />
-						<DropdownMenuItem onClick={onDelete} variant="destructive">
+						<DropdownMenuItem onClick={onDelete} variant="destructive" disabled={disabled}>
 							<Trash2 className="h-3.5 w-3.5" />
 							{type === "note" ? "Remove" : "Delete"}
 						</DropdownMenuItem>

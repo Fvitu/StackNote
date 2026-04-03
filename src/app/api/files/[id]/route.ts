@@ -9,12 +9,11 @@ function buildContentDisposition(fileName: string) {
 	return `attachment; filename="${sanitized}"; filename*=UTF-8''${encoded}`;
 }
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
 	const session = await auth();
 	if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
 	const { id } = await params;
-
 
 	const file = await prisma.file.findUnique({
 		where: { id },
@@ -37,6 +36,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 	if (!isOwner && !isWorkspaceOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
 	const supabase = createAdminClient();
+	const isDownload = req.nextUrl.searchParams.get("download") === "1";
+
+	if (!isDownload) {
+		const { data: signedData, error: signedError } = await supabase.storage.from("stacknote-files").createSignedUrl(file.path, 60);
+
+		if (signedError || !signedData?.signedUrl) {
+			return NextResponse.json({ error: signedError?.message ?? "Failed to create signed URL" }, { status: 500 });
+		}
+
+		const redirect = NextResponse.redirect(signedData.signedUrl, { status: 307 });
+		redirect.headers.set("Cache-Control", "private, no-store");
+		return redirect;
+	}
+
 	const { data, error } = await supabase.storage.from("stacknote-files").download(file.path);
 
 	if (error || !data) {

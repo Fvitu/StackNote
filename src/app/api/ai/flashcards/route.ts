@@ -363,6 +363,16 @@ export async function POST(req: NextRequest) {
       })
     })
 
+    const usageResult = await recordQuotaUsage(session.user.id, {
+		category: "flashcard",
+		model: generation.model,
+		requests: 1,
+		flashcards: generation.cards.length,
+	});
+	if (!usageResult.allowed) {
+		return quotaExceededResponse(usageResult.error ?? "Flashcard limit reached", generation.model, usageResult.resetAt);
+	}
+
     const deck = await prisma.flashcardDeck.create({
       data: {
         userId: session.user.id,
@@ -393,13 +403,6 @@ export async function POST(req: NextRequest) {
       count: deck.cardCount,
     }
 
-    const usageResult = await recordQuotaUsage(session.user.id, {
-      category: "flashcard",
-      model: generation.model,
-      requests: 1,
-      flashcards: payload.count,
-    })
-
     if (activeSessionId) {
       await prisma.aIMessage.create({
         data: {
@@ -419,14 +422,6 @@ export async function POST(req: NextRequest) {
           lastMessageAt: new Date(),
         },
       })
-    }
-
-    if (!usageResult.allowed) {
-      return quotaExceededResponse(
-        usageResult.error ?? "Flashcard limit reached",
-        generation.model,
-        usageResult.resetAt,
-      )
     }
 
     return NextResponse.json({

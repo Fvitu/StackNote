@@ -98,27 +98,7 @@ function ActiveNoteWorkspaceFallback({
 					</div>
 				</div>
 
-				<div className="mx-auto w-full flex-1 px-6 py-8">
-					<div className="mb-2 flex items-start gap-3">
-						<div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--sn-radius-md)]" style={{ backgroundColor: "var(--bg-surface)" }}>
-							{note?.emoji ? <span className="text-xl">{note.emoji}</span> : <FileText className="h-5 w-5" style={{ color: "var(--text-tertiary)" }} />}
-						</div>
-						<div className="min-w-0 flex-1">
-							<h1
-								className="truncate text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]"
-								style={{ color: "var(--text-primary)" }}>
-								{note?.title || "Untitled"}
-							</h1>
-							<p className="mt-2 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-								Loading note workspace
-							</p>
-						</div>
-					</div>
-
-					<div className="group relative mt-2 mx-auto max-w-[720px]">
-						<EditorSkeleton />
-					</div>
-				</div>
+				<EditorSkeleton />
 			</div>
 		</div>
 	);

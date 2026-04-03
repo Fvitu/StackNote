@@ -21,8 +21,24 @@ interface GenerateFlashcardsDialogProps {
 	sessionId?: string;
 }
 
+interface UsageStats {
+	flashcardModels: Array<{
+		model: string;
+		requests: {
+			used: number;
+			limit: number;
+			remaining: number;
+		};
+		flashcards?: {
+			used: number;
+			limit: number;
+			remaining: number;
+		};
+	}>;
+}
+
 const DEFAULT_COUNT = 10;
-const QUICK_COUNTS = [10, 20, 30, 40] as const;
+const QUICK_COUNTS = [5, 10, 15, 20] as const;
 const LANGUAGE_OPTIONS = [
 	{ value: "auto", label: "Auto-detect" },
 	{ value: "English", label: "English" },
@@ -42,6 +58,7 @@ export function GenerateFlashcardsDialog({ open, onClose, onGenerated, defaultTe
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [remainingFlashcards, setRemainingFlashcards] = useState<number | null>(null);
+	const [remainingRequests, setRemainingRequests] = useState<number | null>(null);
 
 	useEffect(() => {
 		if (!open) return;
@@ -50,16 +67,20 @@ export function GenerateFlashcardsDialog({ open, onClose, onGenerated, defaultTe
 		setCustomInstructions("");
 		setError(null);
 		setRemainingFlashcards(null);
+		setRemainingRequests(null);
 
 		(async () => {
 			try {
 				const res = await fetch("/api/ai/usage");
-				if (!res.ok) return;
-				const stats = await res.json();
+				const stats = await readJsonResponse<UsageStats>(res);
+				if (!res.ok || !stats) return;
 				if (!stats || !Array.isArray(stats.flashcardModels)) return;
-				const primary = stats.flashcardModels.find((m: any) => m.model === PRIMARY_FLASHCARD_MODEL);
-				if (!primary || !primary.flashcards) return;
-				setRemainingFlashcards(Number.isFinite(primary.flashcards.remaining) ? primary.flashcards.remaining : null);
+				const primary = stats.flashcardModels.find((m) => m.model === PRIMARY_FLASHCARD_MODEL);
+				if (!primary) return;
+				if (primary.flashcards) {
+					setRemainingFlashcards(Number.isFinite(primary.flashcards.remaining) ? primary.flashcards.remaining : null);
+				}
+				setRemainingRequests(Number.isFinite(primary.requests.remaining) ? primary.requests.remaining : null);
 			} catch {
 				// ignore and fall back to default limits
 			}
@@ -74,7 +95,8 @@ export function GenerateFlashcardsDialog({ open, onClose, onGenerated, defaultTe
 
 	const clampedCount = useMemo(() => Math.max(1, Math.min(effectiveMax || 1, Number.isFinite(count) ? count : DEFAULT_COUNT)), [count, effectiveMax]);
 	const trimmedInstructions = useMemo(() => customInstructions.trim(), [customInstructions]);
-	const canSubmit = sourceText.length > 0 && !isGenerating && (effectiveMax ?? AI_LIMITS.FLASHCARD_MAX_PER_REQUEST) > 0;
+	const hasRemainingRequests = remainingRequests === null ? true : remainingRequests > 0;
+	const canSubmit = sourceText.length > 0 && !isGenerating && hasRemainingRequests && (effectiveMax ?? AI_LIMITS.FLASHCARD_MAX_PER_REQUEST) > 0;
 
 	const handleGenerate = async () => {
 		if (!canSubmit) return;
@@ -135,6 +157,9 @@ export function GenerateFlashcardsDialog({ open, onClose, onGenerated, defaultTe
 					<div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
 						<div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
 							<UsageIndicator model={PRIMARY_FLASHCARD_MODEL} category="flashcard" variant="detailed" />
+							<p className="mt-2 text-xs text-[var(--text-secondary)]">
+								{hasRemainingRequests ? "Requests available in this window" : "No requests remaining in this window"}
+							</p>
 						</div>
 
 						<div className="grid gap-4 md:grid-cols-[1.15fr_0.85fr]">
@@ -170,7 +195,9 @@ export function GenerateFlashcardsDialog({ open, onClose, onGenerated, defaultTe
 								<label htmlFor="flashcard-count" className="text-sm font-medium text-[var(--text-primary)]">
 									Number of cards
 								</label>
-								<p className="mt-1 text-xs text-[var(--text-secondary)]">Pick a compact drill set or a larger study deck.</p>
+								<p className="mt-1 text-xs text-[var(--text-secondary)]">
+									Pick a compact drill set or a larger study deck. Maximum {AI_LIMITS.FLASHCARD_MAX_PER_REQUEST} per request.
+								</p>
 								<div className="mt-3 flex items-center justify-center gap-3">
 									<span className="text-4xl font-semibold tracking-tight text-[var(--text-primary)]">{clampedCount}</span>
 								</div>
@@ -203,7 +230,7 @@ export function GenerateFlashcardsDialog({ open, onClose, onGenerated, defaultTe
 							<input
 								type="range"
 								min={1}
-								max={effectiveMax}
+								max={Math.max(1, effectiveMax)}
 								step={1}
 								value={clampedCount}
 								onChange={(event) => setCount(Number.parseInt(event.target.value, 10))}
@@ -214,8 +241,8 @@ export function GenerateFlashcardsDialog({ open, onClose, onGenerated, defaultTe
 
 							<div className="mt-2 flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
 								<span>1</span>
-								<span>Maximum {effectiveMax} cards per request</span>
-								<span>{effectiveMax}</span>
+								<span>Maximum {Math.max(1, effectiveMax)} cards per request</span>
+								<span>{Math.max(1, effectiveMax)}</span>
 							</div>
 						</div>
 

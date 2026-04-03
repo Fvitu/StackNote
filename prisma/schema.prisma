@@ -5,8 +5,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -29,6 +27,9 @@ model User {
   aiMessages     AIMessage[]
   flashcardDecks FlashcardDeck[]
   settings       UserSettings?
+  quickNote      QuickNote?
+  studySessions  StudySession[]
+  exams          Exam[]
 
   @@index([isGuest, guestLastActiveAt])
   @@map("users")
@@ -249,7 +250,8 @@ model Flashcard {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
-  deck FlashcardDeck @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  deck    FlashcardDeck @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  reviews CardReview[]
 
   @@map("flashcards")
 }
@@ -264,9 +266,10 @@ model FlashcardDeck {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  note       Note?       @relation(fields: [noteId], references: [id], onDelete: SetNull)
-  flashcards Flashcard[]
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  note          Note?          @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  flashcards    Flashcard[]
+  studySessions StudySession[]
 
   @@map("flashcard_decks")
 }
@@ -280,4 +283,78 @@ model UserSettings {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_settings")
+}
+
+model StudySession {
+  id           String       @id @default(cuid())
+  userId       String
+  deckId       String
+  startedAt    DateTime     @default(now())
+  finishedAt   DateTime?
+  cardsStudied Int          @default(0)
+  cardsCorrect Int          @default(0)
+  totalTime    Int          @default(0)
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deck    FlashcardDeck @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  reviews CardReview[]
+
+  @@map("study_sessions")
+}
+
+model CardReview {
+  id        String       @id @default(cuid())
+  sessionId String
+  cardId    String
+  rating    Int
+  timeMs    Int
+  createdAt DateTime     @default(now())
+
+  session StudySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  card    Flashcard    @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@map("card_reviews")
+}
+
+model Exam {
+  id                String         @id @default(cuid())
+  userId            String
+  title             String
+  subject           String?
+  examDate          DateTime
+  noteIds           String[]
+  deckIds           String[]
+  dailyStudyMinutes Int            @default(20)
+  isCompleted       Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studyPlanDays StudyPlanDay[]
+
+  @@map("exams")
+}
+
+model StudyPlanDay {
+  id               String   @id @default(cuid())
+  examId           String
+  date             String
+  cardIds          String[]
+  estimatedMinutes Int      @default(0)
+  isCompleted      Boolean  @default(false)
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@map("study_plan_days")
+}
+
+model QuickNote {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  content   Json?
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("quick_notes")
 }

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { buildFileAccessUrl } from "@/lib/file-url";
+import { parseNoteCoverMeta } from "@/lib/note-cover";
 import { prisma } from "@/lib/prisma";
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
 import { invalidateWorkspaceTree } from "@/lib/server-data";
@@ -46,7 +48,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 		return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 	}
 
-	return NextResponse.json(note);
+	const parsedCoverMeta = parseNoteCoverMeta(note.coverImageMeta);
+	const coverImage = parsedCoverMeta?.source === "upload" ? buildFileAccessUrl(parsedCoverMeta.fileId) : note.coverImage;
+
+	return NextResponse.json({
+		...note,
+		coverImage,
+		content: normalizeBlockNoteContent(note.content),
+	});
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

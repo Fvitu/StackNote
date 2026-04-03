@@ -13,26 +13,28 @@ interface CounterStat {
 }
 
 interface UsageModelStats {
-  category: "text" | "flashcard" | "voice"
-  model: string
-  label: string
-  windowStartedAt: string | null
-  resetAt: string | null
-  requests: CounterStat
-  tokens?: CounterStat
-  flashcards?: CounterStat
-  audioSeconds?: CounterStat
+	category: "text" | "flashcard" | "quiz" | "voice";
+	model: string;
+	label: string;
+	windowStartedAt: string | null;
+	resetAt: string | null;
+	requests: CounterStat;
+	tokens?: CounterStat;
+	flashcards?: CounterStat;
+	questions?: CounterStat;
+	audioSeconds?: CounterStat;
 }
 
 interface UsageStats {
-  textModels: UsageModelStats[]
-  flashcardModels: UsageModelStats[]
-  voiceModels: UsageModelStats[]
+	textModels: UsageModelStats[];
+	flashcardModels: UsageModelStats[];
+	quizModels: UsageModelStats[];
+	voiceModels: UsageModelStats[];
 }
 
 interface UsageIndicatorProps {
 	model: string;
-	category?: "text" | "flashcard" | "voice";
+	category?: "text" | "flashcard" | "quiz" | "voice";
 	variant?: "compact" | "detailed" | "mobile";
 }
 
@@ -89,11 +91,13 @@ export function UsageIndicator({ model, category = "text", variant = "compact" }
       }
 
       const models =
-        category === "voice"
-          ? stats.voiceModels
-          : category === "flashcard"
-            ? stats.flashcardModels
-            : stats.textModels
+			category === "voice"
+				? stats.voiceModels
+				: category === "quiz"
+					? stats.quizModels
+					: category === "flashcard"
+						? stats.flashcardModels
+						: stats.textModels;
 
       return models.find((entry) => entry.model === model) ?? null
     },
@@ -128,19 +132,22 @@ export function UsageIndicator({ model, category = "text", variant = "compact" }
     modelUsage.tokens && modelUsage.tokens.limit > 0 ? modelUsage.tokens.used / modelUsage.tokens.limit : 0
   const flashcardPercentage =
     modelUsage.flashcards && modelUsage.flashcards.limit > 0 ? modelUsage.flashcards.used / modelUsage.flashcards.limit : 0
+  const questionPercentage = modelUsage.questions && modelUsage.questions.limit > 0 ? modelUsage.questions.used / modelUsage.questions.limit : 0;
   const audioPercentage =
     modelUsage.audioSeconds && modelUsage.audioSeconds.limit > 0 ? modelUsage.audioSeconds.used / modelUsage.audioSeconds.limit : 0
-  const percentage = Math.max(requestPercentage, tokenPercentage, flashcardPercentage, audioPercentage)
+  const percentage = Math.max(requestPercentage, tokenPercentage, flashcardPercentage, questionPercentage, audioPercentage);
   const isNearLimit = percentage >= 0.8
   const countdown = modelUsage.resetAt ? formatUsageResetCountdown(modelUsage.resetAt, now) : null
-  const secondaryMetric = modelUsage.tokens ?? modelUsage.flashcards ?? modelUsage.audioSeconds ?? null
+  const secondaryMetric = modelUsage.tokens ?? modelUsage.flashcards ?? modelUsage.questions ?? modelUsage.audioSeconds ?? null;
   const secondaryLabel = modelUsage.tokens
-    ? "tokens"
-    : modelUsage.flashcards
-      ? "flashcards"
-      : modelUsage.audioSeconds
-        ? "audio"
-        : null
+		? "tokens"
+		: modelUsage.flashcards
+			? "flashcards"
+			: modelUsage.questions
+				? "questions"
+				: modelUsage.audioSeconds
+					? "audio"
+					: null;
   const secondaryRemaining = modelUsage.audioSeconds
     ? formatDurationSeconds(modelUsage.audioSeconds.remaining)
     : secondaryMetric

@@ -2,11 +2,15 @@
 
 import dynamic from "next/dynamic";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WorkspaceProvider } from "@/contexts/WorkspaceContext";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { MainContent } from "@/components/layout/MainContent";
 import { AppShellSkeleton } from "@/components/layout/AppShellSkeleton";
+import { PomodoroWidget } from "@/components/pomodoro/PomodoroWidget";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { QuickNoteWidget } from "@/components/quick-note/QuickNoteWidget";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKeyboardShortcut } from "@/hooks/useKeyboardShortcut";
 import { fetchJson } from "@/lib/api-client";
@@ -25,6 +29,7 @@ import {
 } from "@/lib/tree-helpers";
 
 const EMPTY_TREE: WorkspaceTree = { folders: [], rootNotes: [] };
+const SETTINGS_DOCK_TRANSITION_MS = 220;
 const SearchModalClient = dynamic(() => import("@/components/search/SearchModal").then((module) => module.SearchModal), { ssr: false });
 const NameCaptureDialogClient = dynamic(() => import("@/components/layout/NameCaptureDialog").then((module) => module.NameCaptureDialog), { ssr: false });
 const AccountDialogClient = dynamic(() => import("@/components/layout/AccountDialog").then((module) => module.AccountDialog), { ssr: false });
@@ -41,7 +46,9 @@ interface AppShellProps {
 	};
 }
 
-function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
+function AppShellInner({ initialShell, children }: AppShellProps) {
+	const pathname = usePathname();
+	const router = useRouter();
 	const queryClient = useQueryClient();
 	const bootstrapQuery = useQuery({
 		queryKey: queryKeys.bootstrap,
@@ -67,9 +74,18 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 	const [currentWorkspaceName, setCurrentWorkspaceName] = useState(initialShell.workspaceName);
 	const [currentUserName, setCurrentUserName] = useState(initialShell.userName ?? "");
 	const [isSidebarPreviewOpen, setIsSidebarPreviewOpen] = useState(false);
+	const [isSettingsDockOpen, setIsSettingsDockOpen] = useState(false);
+	const [isSettingsDockMounted, setIsSettingsDockMounted] = useState(false);
+	const [isSettingsDockVisible, setIsSettingsDockVisible] = useState(false);
 	const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
 	const [canUseSidebarPreview, setCanUseSidebarPreview] = useState(false);
 	const { state, setActiveNote, toggleFolder, toggleSidebar, setSidebarOpen } = useWorkspace();
+	const isWorkspaceRoute = pathname === "/";
+	const isSidebarVisible = state.isSidebarOpen && !state.isFocusMode;
+	const settingsDockWidth = 480;
+	const previousSidebarVisibleRef = useRef(isSidebarVisible);
+	const settingsDockRef = useRef<HTMLDivElement | null>(null);
+	const dockedContentOffset = !isMobileSidebarMode && isSidebarVisible ? state.sidebarWidth : 0;
 
 	useEffect(() => {
 		if (!bootstrapData) {
@@ -104,6 +120,10 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 	}, []);
 
 	useEffect(() => {
+		if (pathname !== "/") {
+			return;
+		}
+
 		const params = new URLSearchParams(window.location.search);
 
 		if (state.activeNoteId) {
@@ -120,8 +140,11 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 
 		const query = params.toString();
 		const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
-		window.history.replaceState(null, "", nextUrl);
-	}, [state.activeNoteId, activeFolderId]);
+		const currentUrl = `${window.location.pathname}${window.location.search}`;
+		if (currentUrl !== nextUrl) {
+			window.history.replaceState(null, "", nextUrl);
+		}
+	}, [pathname, state.activeNoteId, activeFolderId]);
 
 	const fetchTree = useCallback(async () => {
 		if (!workspaceId) {
@@ -134,20 +157,126 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 	}, [queryClient, workspaceId]);
 
 	const showSidebarPreview = useCallback(() => {
-		if (state.isSidebarOpen) return;
+		if (isSidebarVisible) return;
 		setIsSidebarPreviewOpen(true);
-	}, [state.isSidebarOpen]);
+	}, [isSidebarVisible]);
 
 	const hideSidebarPreview = useCallback(() => {
-		if (state.isSidebarOpen) return;
+		if (isSidebarVisible) return;
 		setIsSidebarPreviewOpen(false);
-	}, [state.isSidebarOpen]);
+	}, [isSidebarVisible]);
+
+	const hideDockedPanels = useCallback(() => {
+		if (!isSidebarVisible) {
+			setIsSettingsDockOpen(false);
+			setIsSidebarPreviewOpen(false);
+		}
+	}, [isSidebarVisible]);
+
+	const toggleSettingsDock = useCallback(() => {
+		setIsSettingsDockOpen((currentOpen) => !currentOpen);
+	}, []);
+
+	useEffect(() => {
+		if (isSettingsDockOpen && !isSidebarVisible && !isMobileSidebarMode) {
+			setIsSidebarPreviewOpen(true);
+		}
+	}, [isMobileSidebarMode, isSettingsDockOpen, isSidebarVisible]);
+
+	useEffect(() => {
+		if (!isSettingsDockOpen && !isSidebarVisible) {
+			setIsSidebarPreviewOpen(false);
+		}
+	}, [isSettingsDockOpen, isSidebarVisible]);
+
+	useEffect(() => {
+		if (previousSidebarVisibleRef.current && !isSidebarVisible) {
+			setIsSettingsDockOpen(false);
+			setIsSidebarPreviewOpen(false);
+		}
+
+		previousSidebarVisibleRef.current = isSidebarVisible;
+	}, [isSidebarVisible]);
 
 	useEffect(() => {
 		if (state.isSidebarOpen) {
 			setIsSidebarPreviewOpen(false);
 		}
 	}, [state.isSidebarOpen]);
+
+	useEffect(() => {
+		if (isSettingsDockOpen) {
+			if (!isSettingsDockMounted) {
+				setIsSettingsDockMounted(true);
+				return;
+			}
+
+			if (!isSettingsDockVisible) {
+				const frame = window.requestAnimationFrame(() => {
+					setIsSettingsDockVisible(true);
+				});
+
+				return () => {
+					window.cancelAnimationFrame(frame);
+				};
+			}
+
+			return;
+		}
+
+		if (isSettingsDockVisible) {
+			setIsSettingsDockVisible(false);
+		}
+
+		if (!isSettingsDockMounted) {
+			return;
+		}
+
+		const timeout = window.setTimeout(() => {
+			setIsSettingsDockMounted(false);
+		}, SETTINGS_DOCK_TRANSITION_MS);
+
+		return () => {
+			window.clearTimeout(timeout);
+		};
+	}, [isSettingsDockMounted, isSettingsDockOpen, isSettingsDockVisible]);
+
+	useEffect(() => {
+		if (!isSettingsDockOpen) {
+			return;
+		}
+
+		const handlePointerDown = (event: MouseEvent) => {
+			const target = event.target;
+			if (!(target instanceof Node)) {
+				return;
+			}
+
+			if (target instanceof HTMLElement && target.closest('[data-settings-toggle="true"]')) {
+				return;
+			}
+
+			if (settingsDockRef.current?.contains(target)) {
+				return;
+			}
+
+			setIsSettingsDockOpen(false);
+		};
+
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setIsSettingsDockOpen(false);
+			}
+		};
+
+		window.addEventListener("mousedown", handlePointerDown);
+		window.addEventListener("keydown", handleKeyDown);
+
+		return () => {
+			window.removeEventListener("mousedown", handlePointerDown);
+			window.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [isSettingsDockOpen]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
@@ -200,7 +329,6 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 			if (!workspaceId) {
 				return null;
 			}
-
 			const treeKey = queryKeys.workspaceTree(workspaceId);
 			const previousTree = queryClient.getQueryData<WorkspaceTree>(treeKey) ?? EMPTY_TREE;
 			queryClient.setQueryData(treeKey, optimisticUpdate(previousTree));
@@ -361,24 +489,27 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 		[optimisticAction],
 	);
 
-	const updateUserName = useCallback(async (name: string) => {
-		await fetchJson<{ success: boolean }>("/api/user/name", {
-			method: "PATCH",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ name }),
-		});
+	const updateUserName = useCallback(
+		async (name: string) => {
+			await fetchJson<{ success: boolean }>("/api/user/name", {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ name }),
+			});
 
-		setCurrentUserName(name);
-		queryClient.setQueryData(queryKeys.currentUser, (currentUser: BootstrapResponse["user"] | undefined) =>
-			currentUser
-				? {
-						...currentUser,
-						name,
-					}
-				: currentUser,
-		);
-		setShowNameDialog(false);
-	}, [queryClient]);
+			setCurrentUserName(name);
+			queryClient.setQueryData(queryKeys.currentUser, (currentUser: BootstrapResponse["user"] | undefined) =>
+				currentUser
+					? {
+							...currentUser,
+							name,
+						}
+					: currentUser,
+			);
+			setShowNameDialog(false);
+		},
+		[queryClient],
+	);
 
 	const updateWorkspaceName = useCallback(
 		async (name: string) => {
@@ -429,6 +560,8 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 								setSidebarOpen(false);
 							}
 						},
+						onSettingsOpen: toggleSettingsDock,
+						isSettingsOpen: isSettingsDockOpen,
 						onCreateNote: handleCreateNote,
 						onCreateFolder: handleCreateFolder,
 						onDeleteNote: handleDeleteNote,
@@ -438,7 +571,7 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 						onMoveNote: handleMoveNote,
 						onMoveFolder: handleMoveFolder,
 						onFolderVisited: setActiveFolderId,
-				  }
+					}
 				: null,
 		[
 			bootstrapData,
@@ -454,8 +587,9 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 			handleRenameFolder,
 			handleRenameNote,
 			isMobileSidebarMode,
-			queryClient,
+			isSettingsDockOpen,
 			setSidebarOpen,
+			toggleSettingsDock,
 			tree,
 			workspaceId,
 		],
@@ -501,17 +635,43 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 
 	return (
 		<div className="relative flex h-screen overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
-			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && (
+			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && !state.isFocusMode && (
 				<div className="sidebar-preview-trigger" onMouseEnter={showSidebarPreview} aria-hidden="true" />
 			)}
-			<div
-				className={`sidebar-dock ${state.isSidebarOpen ? "sidebar-dock-open" : "sidebar-dock-closed"}`}
-				style={{ width: state.isSidebarOpen && !isMobileSidebarMode ? state.sidebarWidth : 0 }}>
-				<div className={`sidebar-surface ${state.isSidebarOpen ? "sidebar-surface-open" : "sidebar-surface-closed"}`}>
-					<Sidebar {...sidebarProps} />
+			{(isSidebarVisible || isSettingsDockMounted) && !isMobileSidebarMode && (
+				<div
+					className="fixed inset-y-0 left-0 z-50 flex overflow-hidden"
+					style={{
+						width: state.sidebarWidth,
+						transition: "width 280ms cubic-bezier(0.22, 1, 0.36, 1)",
+					}}
+					onMouseLeave={isSettingsDockMounted ? undefined : hideDockedPanels}>
+					<div className="h-full flex-shrink-0" style={{ width: state.sidebarWidth, minWidth: state.sidebarWidth }}>
+						<div className={`sidebar-surface ${isSidebarVisible || isSettingsDockOpen ? "sidebar-surface-open" : "sidebar-surface-closed"}`}>
+							<Sidebar {...sidebarProps} />
+						</div>
+					</div>
 				</div>
-			</div>
-			{isMobileSidebarMode && state.isSidebarOpen && (
+			)}
+			{isSettingsDockMounted && !isMobileSidebarMode && (
+				<div
+					ref={settingsDockRef}
+					className="fixed inset-y-0 z-[56] overflow-hidden"
+					style={{
+						left: state.sidebarWidth,
+						width: settingsDockWidth,
+						minWidth: settingsDockWidth,
+						boxShadow: "24px 0 48px rgba(0, 0, 0, 0.32)",
+						opacity: isSettingsDockVisible ? 1 : 0,
+						transform: isSettingsDockVisible ? "translateX(0)" : "translateX(-14px)",
+						pointerEvents: isSettingsDockVisible ? "auto" : "none",
+						willChange: "opacity, transform",
+						transition: `opacity ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1), transform ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+					}}>
+					<SettingsPanel variant="dock" onClose={() => setIsSettingsDockOpen(false)} />
+				</div>
+			)}
+			{isMobileSidebarMode && isSidebarVisible && (
 				<>
 					<button type="button" className="sidebar-mobile-backdrop" onClick={toggleSidebar} aria-label="Close sidebar overlay" />
 					<div className="sidebar-mobile-layer" style={{ width: state.sidebarWidth }}>
@@ -519,9 +679,24 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 							<Sidebar {...sidebarProps} />
 						</div>
 					</div>
+					{isSettingsDockMounted && (
+						<div
+							ref={settingsDockRef}
+							className="fixed inset-y-0 right-0 z-[56] overflow-hidden"
+							style={{
+								width: `calc(100vw - ${state.sidebarWidth}px)`,
+								opacity: isSettingsDockVisible ? 1 : 0,
+								transform: isSettingsDockVisible ? "translateX(0)" : "translateX(18px)",
+								pointerEvents: isSettingsDockVisible ? "auto" : "none",
+								willChange: "opacity, transform",
+								transition: `opacity ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1), transform ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+							}}>
+							<SettingsPanel variant="dock" onClose={() => setIsSettingsDockOpen(false)} />
+						</div>
+					)}
 				</>
 			)}
-			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && (
+			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && !isSettingsDockMounted && (
 				<div
 					className={`sidebar-preview-layer ${isSidebarPreviewOpen ? "sidebar-preview-layer-open" : ""}`}
 					style={{ width: state.sidebarWidth }}
@@ -533,20 +708,38 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 					</div>
 				</div>
 			)}
-			<MainContent
-				workspaceId={workspaceId}
-				workspaceName={currentWorkspaceName}
-				onNoteCreated={fetchTree}
-				onRefresh={fetchTree}
-				isSidebarOpen={state.isSidebarOpen}
-				onToggleSidebar={handleSidebarToggleButton}
-				tree={tree}
-			/>
+			<div
+				className="flex min-w-0 flex-1 overflow-hidden"
+				style={{
+					backgroundColor: "var(--bg-app)",
+					paddingLeft: dockedContentOffset,
+					transition: "padding-left 280ms cubic-bezier(0.22, 1, 0.36, 1)",
+				}}>
+				{isWorkspaceRoute ? (
+					<MainContent
+						workspaceId={workspaceId}
+						workspaceName={currentWorkspaceName}
+						onNoteCreated={fetchTree}
+						onRefresh={fetchTree}
+						isSidebarOpen={isSidebarVisible}
+						onToggleSidebar={handleSidebarToggleButton}
+						tree={tree}
+					/>
+				) : (
+					<div className="flex min-w-0 flex-1 overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
+						{children}
+					</div>
+				)}
+			</div>
+			<PomodoroWidget sidebarOffset={isSidebarVisible && !isMobileSidebarMode ? state.sidebarWidth + 24 : 24} />
 			<SearchModalClient
 				workspaceId={workspaceId}
 				open={searchOpen}
 				onSelectNote={(id) => {
 					setActiveNote(id);
+					if (pathname !== "/") {
+						router.push(`/?note=${encodeURIComponent(id)}`);
+					}
 					if (typeof window !== "undefined" && window.innerWidth < 768) {
 						toggleSidebar();
 					}
@@ -565,14 +758,15 @@ function AppShellInner({ initialShell }: Pick<AppShellProps, "initialShell">) {
 				onSaveWorkspaceName={updateWorkspaceName}
 			/>
 			<NameCaptureDialogClient open={showNameDialog} onNameSubmit={handleNameSubmit} />
+			<QuickNoteWidget userId={bootstrapData.user.id} />
 		</div>
 	);
 }
 
-export function AppShell({ initialShell }: AppShellProps) {
+export function AppShell({ initialShell, children }: AppShellProps) {
 	return (
 		<WorkspaceProvider>
-			<AppShellInner initialShell={initialShell} />
+			<AppShellInner initialShell={initialShell}>{children}</AppShellInner>
 		</WorkspaceProvider>
 	);
 }
