@@ -1,34 +1,34 @@
-import { prisma } from "@/lib/prisma"
-import { createAdminClient } from "@/lib/supabase/server"
+import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/server";
 
-const STORAGE_BUCKET = "stacknote-files"
+const STORAGE_BUCKET = "stacknote-files";
 
-export const GUEST_INACTIVITY_MS = 24 * 60 * 60 * 1000
-const CLEANUP_INTERVAL_MS = 10 * 60 * 1000
-export const GUEST_TOUCH_INTERVAL_MS = 5 * 60 * 1000
+export const GUEST_INACTIVITY_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+export const GUEST_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 
-let cleanupPromise: Promise<void> | null = null
-let lastCleanupAt = 0
+let cleanupPromise: Promise<void> | null = null;
+let lastCleanupAt = 0;
 
 function chunk<T>(items: T[], size: number): T[][] {
-	const chunks: T[][] = []
+	const chunks: T[][] = [];
 	for (let i = 0; i < items.length; i += size) {
-		chunks.push(items.slice(i, i + size))
+		chunks.push(items.slice(i, i + size));
 	}
-	return chunks
+	return chunks;
 }
 
 export function createGuestIdentity() {
-	const nonce = crypto.randomUUID().replace(/-/g, "")
+	const nonce = crypto.randomUUID().replace(/-/g, "");
 	return {
 		email: `guest-${nonce}@guest.stacknote.local`,
 		name: "Guest",
-	}
+	};
 }
 
 export async function createGuestUserWithWorkspace() {
-	const now = new Date()
-	const identity = createGuestIdentity()
+	const now = new Date();
+	const identity = createGuestIdentity();
 
 	const user = await prisma.user.create({
 		data: {
@@ -42,29 +42,29 @@ export async function createGuestUserWithWorkspace() {
 			isGuest: true,
 			guestLastActiveAt: true,
 		},
-	})
+	});
 
 	await prisma.workspace.create({
 		data: {
 			name: "Guest Workspace",
 			userId: user.id,
 		},
-	})
+	});
 
-	return user
+	return user;
 }
 
 async function removeStoredFiles(paths: string[]) {
 	if (!paths.length) {
-		return
+		return;
 	}
 
-	const supabase = createAdminClient()
+	const supabase = createAdminClient();
 
 	for (const batch of chunk(paths, 100)) {
-		const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(batch)
+		const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(batch);
 		if (error) {
-			console.error("Failed removing guest files from storage:", error)
+			console.error("Failed removing guest files from storage:", error);
 		}
 	}
 }
@@ -73,33 +73,33 @@ export async function purgeGuestUser(userId: string) {
 	const files = await prisma.file.findMany({
 		where: { userId },
 		select: { path: true },
-	})
+	});
 
-	const uniquePaths = Array.from(new Set(files.map((file) => file.path).filter(Boolean)))
-	await removeStoredFiles(uniquePaths)
+	const uniquePaths = Array.from(new Set(files.map((file) => file.path).filter(Boolean)));
+	await removeStoredFiles(uniquePaths);
 
 	await prisma.user.deleteMany({
 		where: {
 			id: userId,
 			isGuest: true,
 		},
-	})
+	});
 }
 
 export function isGuestExpired(lastActiveAt: Date | null | undefined, now = Date.now()) {
 	if (!lastActiveAt) {
-		return true
+		return true;
 	}
 
-	return now - lastActiveAt.getTime() >= GUEST_INACTIVITY_MS
+	return now - lastActiveAt.getTime() >= GUEST_INACTIVITY_MS;
 }
 
 export async function touchGuestActivity(userId: string, lastActiveAt: Date | null | undefined) {
-	const now = Date.now()
-	const lastActiveMs = lastActiveAt?.getTime() ?? 0
+	const now = Date.now();
+	const lastActiveMs = lastActiveAt?.getTime() ?? 0;
 
 	if (now - lastActiveMs < GUEST_TOUCH_INTERVAL_MS) {
-		return
+		return;
 	}
 
 	await prisma.user.updateMany({
@@ -110,53 +110,50 @@ export async function touchGuestActivity(userId: string, lastActiveAt: Date | nu
 		data: {
 			guestLastActiveAt: new Date(now),
 		},
-	})
+	});
 }
 
 export async function cleanupExpiredGuestUsers() {
-	const now = Date.now()
-	const expiryDate = new Date(now - GUEST_INACTIVITY_MS)
+	const now = Date.now();
+	const expiryDate = new Date(now - GUEST_INACTIVITY_MS);
 
 	const expiredGuests = await prisma.user.findMany({
 		where: {
 			isGuest: true,
-			OR: [
-				{ guestLastActiveAt: null },
-				{ guestLastActiveAt: { lt: expiryDate } },
-			],
+			OR: [{ guestLastActiveAt: null }, { guestLastActiveAt: { lt: expiryDate } }],
 		},
 		select: { id: true },
 		take: 200,
-	})
+	});
 
 	for (const guest of expiredGuests) {
 		try {
-			await purgeGuestUser(guest.id)
+			await purgeGuestUser(guest.id);
 		} catch (error) {
-			console.error("Failed to purge expired guest user:", guest.id, error)
+			console.error("Failed to purge expired guest user:", guest.id, error);
 		}
 	}
 }
 
 export function scheduleGuestCleanup() {
-	const now = Date.now()
+	const now = Date.now();
 
 	if (cleanupPromise) {
-		return cleanupPromise
+		return cleanupPromise;
 	}
 
 	if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) {
-		return null
+		return null;
 	}
 
 	cleanupPromise = cleanupExpiredGuestUsers()
 		.catch((error) => {
-			console.error("Guest cleanup failed:", error)
+			console.error("Guest cleanup failed:", error);
 		})
 		.finally(() => {
-			lastCleanupAt = Date.now()
-			cleanupPromise = null
-		})
+			lastCleanupAt = Date.now();
+			cleanupPromise = null;
+		});
 
-	return cleanupPromise
+	return cleanupPromise;
 }

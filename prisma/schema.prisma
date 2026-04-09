@@ -100,6 +100,7 @@ model Folder {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   notes       Note[]
 
+  @@index([workspaceId])
   @@map("folders")
 }
 
@@ -107,6 +108,7 @@ model Note {
   id             String          @id @default(cuid())
   title          String          @default("Untitled")
   content        Json?
+  searchableText String?         @db.Text
   workspaceId    String
   folderId       String?
   emoji          String?
@@ -122,10 +124,13 @@ model Note {
   aiChatSessions AIChatSession[]
   flashcardDecks FlashcardDeck[]
   searchVector   Unsupported("tsvector")?
+  embedding      Unsupported("vector(768)")?
+  vectorUpdatedAt DateTime?
   folder         Folder?         @relation(fields: [folderId], references: [id])
   workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([searchVector], type: Gin)
+  @@index([workspaceId, updatedAt(sort: Desc)])
   @@map("notes")
 }
 
@@ -253,6 +258,7 @@ model Flashcard {
   deck    FlashcardDeck @relation(fields: [deckId], references: [id], onDelete: Cascade)
   reviews CardReview[]
 
+  @@index([deckId, dueDate])
   @@map("flashcards")
 }
 
@@ -340,6 +346,7 @@ model StudyPlanDay {
   examId           String
   date             String
   cardIds          String[]
+  questionCount    Int      @default(0)
   estimatedMinutes Int      @default(0)
   isCompleted      Boolean  @default(false)
 

@@ -4,19 +4,21 @@ import dynamic from "next/dynamic";
 import { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { FileText, Plus, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History, Sparkles, Crosshair, Minimize2 } from "lucide-react";
+import { FileText, Plus, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History, Sparkles, Brain } from "lucide-react";
 import { AIPanelSkeleton } from "@/components/ai/AIPanelSkeleton";
 import { LazyNoteEditor } from "@/components/editor/LazyNoteEditor";
 import type { NoteEditorRef } from "@/components/editor/NoteEditor";
 import { NoteTitle } from "@/components/editor/NoteTitle";
-import { SaveIndicator } from "@/components/editor/SaveIndicator"
+import { SaveIndicator } from "@/components/editor/SaveIndicator";
 import { EditorSkeleton, EmojiPickerSkeleton } from "@/components/layout/AppShellSkeleton";
+import { Breadcrumb, type BreadcrumbSegment } from "@/components/layout/Breadcrumb";
 import { NoteCoverPanel } from "@/components/layout/NoteCoverPanel";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { NoteActionsMenu } from "@/components/layout/NoteActionsMenu";
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
 import { resolveNoteCoverMeta } from "@/lib/note-cover";
 import { useNoteCache, type CachedNote, type CachedNoteMetadata } from "@/hooks/useNoteCache";
+import { readPendingAiPrompt } from "@/lib/pending-ai-prompt";
 import {
 	NOTE_VERSION_IDLE_THRESHOLD_MS,
 	NOTE_VERSION_MAX_INTERVAL_MS,
@@ -74,6 +76,7 @@ interface NoteWorkspaceProps {
 	workspaceId: string;
 	workspaceName: string;
 	onNoteCreated: () => void;
+	onOpenNote: (noteId: string | null) => void;
 	onRefresh: () => void;
 	isSidebarOpen: boolean;
 	onToggleSidebar: () => void;
@@ -170,6 +173,7 @@ function buildCachedMetadata(note: NoteData): CachedNoteMetadata {
 		createdAt: note.createdAt,
 		workspace: note.workspace,
 		folder: note.folder,
+		folderPath: note.folderPath ?? [],
 		editorWidth: note.editorWidth ?? null,
 	};
 }
@@ -187,6 +191,7 @@ function hydrateCachedNote(cachedNote: CachedNote, workspaceName: string): NoteD
 		editorWidth: cachedNote.metadata?.editorWidth ?? null,
 		workspace: cachedNote.metadata?.workspace ?? { name: workspaceName },
 		folder: cachedNote.metadata?.folder ?? null,
+		folderPath: cachedNote.metadata?.folderPath ?? [],
 	};
 }
 
@@ -229,25 +234,62 @@ function buildPlaceholderNote(note: NoteTreeItem, workspaceName: string): NoteDa
 		updatedAt: now,
 		workspace: { name: workspaceName },
 		folder: null,
+		folderPath: [],
 	};
 }
 
-export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNoteCreated, onRefresh, isSidebarOpen, onToggleSidebar, tree }: NoteWorkspaceProps) {
-	const { state, setActiveNote, toggleFocusMode } = useWorkspace();
+function buildBreadcrumbSegments(note: NoteData): BreadcrumbSegment[] {
+	const segments: BreadcrumbSegment[] = [
+		{
+			label: note.workspace.name,
+			href: "/",
+		},
+	];
+
+	for (const folder of note.folderPath ?? []) {
+		segments.push({
+			label: folder.name,
+			href: `/?folder=${encodeURIComponent(folder.id)}`,
+		});
+	}
+
+	segments.push({
+		label: note.title || "Untitled",
+		href: `/note/${encodeURIComponent(note.id)}`,
+		isCurrent: true,
+	});
+
+	return segments;
+}
+
+export function NoteWorkspace({
+	activeNoteId,
+	workspaceId,
+	workspaceName,
+	onNoteCreated,
+	onOpenNote,
+	onRefresh,
+	isSidebarOpen,
+	onToggleSidebar,
+	tree,
+}: NoteWorkspaceProps) {
+	const { state, toggleFocusMode } = useWorkspace();
 	const queryClient = useQueryClient();
 	const noteCache = useNoteCache();
 	const [note, setNote] = useState<NoteData | null>(null);
 	const noteRef = useRef<NoteData | null>(null);
+	const focusModeRootRef = useRef<HTMLDivElement | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 	const [isOnline, setIsOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
+	const [isDesktopScreen, setIsDesktopScreen] = useState(() => (typeof window === "undefined" ? true : window.innerWidth >= 1024));
+	const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window === "undefined" ? false : window.innerWidth < 768));
 	const [isNewNote, setIsNewNote] = useState(false);
 	const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
 	const [editorWidth, setEditorWidth] = useState(DEFAULT_EDITOR_WIDTH);
 	const [isResizing, setIsResizing] = useState(false);
 	const editorShellRef = useRef<HTMLDivElement | null>(null);
 	const mainScrollRef = useRef<HTMLDivElement | null>(null);
-	const focusModeWidthSnapshotsRef = useRef<Map<string, number>>(new Map());
 	const marqueeSelectionRef = useRef<MarqueeSelection | null>(null);
 	const editorWidthDraftRef = useRef(DEFAULT_EDITOR_WIDTH);
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -297,6 +339,19 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 		staleTime: 30_000,
 		retry: 1,
 	});
+
+	useEffect(() => {
+		if (!activeNoteId) {
+			return;
+		}
+
+		if (!readPendingAiPrompt(activeNoteId)) {
+			return;
+		}
+
+		setIsAiPanelMounted(true);
+		setIsAIPanelOpen(true);
+	}, [activeNoteId]);
 
 	const applyEditorWidth = useCallback((width: number) => {
 		editorWidthDraftRef.current = width;
@@ -354,16 +409,10 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 			setIsNewNote(nextNote.title === "Untitled" && !nextNote.content);
 
 			const resolvedWidth = getResolvedEditorWidth(nextNote);
-			const nextWidth = state.isFocusMode ? getMaxAllowedEditorWidth() : resolvedWidth;
-
-			if (state.isFocusMode && !focusModeWidthSnapshotsRef.current.has(nextNote.id)) {
-				focusModeWidthSnapshotsRef.current.set(nextNote.id, resolvedWidth);
-			}
-
-			setEditorWidth(nextWidth);
-			applyEditorWidth(nextWidth);
+			setEditorWidth(resolvedWidth);
+			applyEditorWidth(resolvedWidth);
 		},
-		[applyEditorWidth, setCurrentNoteState, state.isFocusMode],
+		[applyEditorWidth, setCurrentNoteState],
 	);
 
 	const cacheNoteSnapshot = useCallback(
@@ -634,7 +683,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 		const shouldApplyRemoteContent =
 			hasEditsSinceVersionRef.current === false &&
 			((hasComparableTimestamps && remoteUpdatedAt > currentUpdatedAt) ||
-				(!Number.isFinite(currentUpdatedAt) || !Number.isFinite(remoteUpdatedAt)) && remoteNote.updatedAt !== current.updatedAt);
+				((!Number.isFinite(currentUpdatedAt) || !Number.isFinite(remoteUpdatedAt)) && remoteNote.updatedAt !== current.updatedAt));
 
 		if (shouldApplyRemoteContent) {
 			applyLoadedNoteState(remoteNote);
@@ -867,7 +916,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 		if (res.ok) {
 			const newNote = await res.json();
 			onNoteCreated();
-			setActiveNote(newNote.id);
+			onOpenNote(newNote.id);
 			setIsNewNote(true);
 		}
 	};
@@ -908,58 +957,62 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 
 			onNoteCreated();
 			onRefresh();
+			onOpenNote(newNote.id);
 		}
-	}, [note, workspaceId, onNoteCreated, onRefresh]);
+	}, [note, onNoteCreated, onOpenNote, onRefresh, workspaceId]);
 
 	const handleDelete = useCallback(async () => {
 		if (!note) return;
 		await fetch(`/api/notes/${note.id}`, { method: "DELETE" });
-		setActiveNote(null);
+		onOpenNote(null);
 		onRefresh();
-	}, [note, setActiveNote, onRefresh]);
+	}, [note, onOpenNote, onRefresh]);
 
-	const fetchVersions = useCallback(async (noteId: string, showLoading = true): Promise<NoteVersionSummary[]> => {
-		if (!noteId) return [];
-		if (!isOnline) {
-			if (noteRef.current?.id === noteId) {
-				setVersions([]);
-				lastVersionCreatedAtRef.current = null;
-			}
-			return [];
-		}
-
-		if (showLoading) {
-			setVersionsLoading(true);
-		}
-
-		try {
-			const response = await fetch(`/api/notes/${noteId}/versions`);
-			if (!response.ok) {
-				throw new Error("Failed to load versions");
+	const fetchVersions = useCallback(
+		async (noteId: string, showLoading = true): Promise<NoteVersionSummary[]> => {
+			if (!noteId) return [];
+			if (!isOnline) {
+				if (noteRef.current?.id === noteId) {
+					setVersions([]);
+					lastVersionCreatedAtRef.current = null;
+				}
+				return [];
 			}
 
-			const data = (await response.json()) as { versions?: NoteVersionSummary[] };
-			if (noteRef.current?.id === noteId) {
-				const nextVersions = data.versions ?? [];
-				setVersions(nextVersions);
-				lastVersionCreatedAtRef.current = nextVersions[0] ? new Date(nextVersions[0].createdAt).getTime() : null;
-				return nextVersions;
-			}
-
-			return data.versions ?? [];
-		} catch {
-			if (noteRef.current?.id === noteId) {
-				setVersions([]);
-				lastVersionCreatedAtRef.current = null;
-			}
-
-			return [];
-		} finally {
 			if (showLoading) {
-				setVersionsLoading(false);
+				setVersionsLoading(true);
 			}
-		}
-	}, [isOnline]);
+
+			try {
+				const response = await fetch(`/api/notes/${noteId}/versions`);
+				if (!response.ok) {
+					throw new Error("Failed to load versions");
+				}
+
+				const data = (await response.json()) as { versions?: NoteVersionSummary[] };
+				if (noteRef.current?.id === noteId) {
+					const nextVersions = data.versions ?? [];
+					setVersions(nextVersions);
+					lastVersionCreatedAtRef.current = nextVersions[0] ? new Date(nextVersions[0].createdAt).getTime() : null;
+					return nextVersions;
+				}
+
+				return data.versions ?? [];
+			} catch {
+				if (noteRef.current?.id === noteId) {
+					setVersions([]);
+					lastVersionCreatedAtRef.current = null;
+				}
+
+				return [];
+			} finally {
+				if (showLoading) {
+					setVersionsLoading(false);
+				}
+			}
+		},
+		[isOnline],
+	);
 
 	useEffect(() => {
 		if (!isOnline) {
@@ -1478,70 +1531,47 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 	}, []);
 
 	const handleToggleFocusMode = useCallback(() => {
-		const currentNote = noteRef.current;
-		if (currentNote && !state.isFocusMode) {
-			focusModeWidthSnapshotsRef.current.set(currentNote.id, editorWidthDraftRef.current);
+		if (!isDesktopScreen) {
+			return;
 		}
 
 		toggleFocusMode();
-	}, [state.isFocusMode, toggleFocusMode]);
+	}, [isDesktopScreen, toggleFocusMode]);
 
 	const handleCloseAIPanel = useCallback(() => {
 		setIsAIPanelOpen(false);
 	}, []);
 
 	useEffect(() => {
-		const currentNote = noteRef.current;
-		if (!currentNote) {
-			return;
-		}
-
-		if (state.isFocusMode) {
-			if (!focusModeWidthSnapshotsRef.current.has(currentNote.id)) {
-				focusModeWidthSnapshotsRef.current.set(currentNote.id, editorWidthDraftRef.current);
+		if (!state.isFocusMode) {
+			if (typeof document !== "undefined" && document.fullscreenElement) {
+				void document.exitFullscreen().catch((error) => {
+					console.error("Failed to exit fullscreen after leaving focus mode", error);
+				});
 			}
 
-			const focusWidth = getMaxAllowedEditorWidth();
-			setEditorWidth(focusWidth);
-			applyEditorWidth(focusWidth);
 			return;
 		}
 
-		const restoredWidth = focusModeWidthSnapshotsRef.current.get(currentNote.id);
-		if (typeof restoredWidth === "number") {
-			focusModeWidthSnapshotsRef.current.delete(currentNote.id);
-			setEditorWidth(restoredWidth);
-			applyEditorWidth(restoredWidth);
-		}
+		setIsAIPanelOpen(false);
 
-		if (focusModeWidthSnapshotsRef.current.size > 0) {
-			focusModeWidthSnapshotsRef.current.clear();
+		if (focusModeRootRef.current && typeof document !== "undefined" && !document.fullscreenElement) {
+			void focusModeRootRef.current.requestFullscreen().catch((error) => {
+				console.error("Failed to enter fullscreen for focus mode", error);
+			});
 		}
-	}, [activeNoteId, applyEditorWidth, state.isFocusMode]);
+	}, [state.isFocusMode]);
 
 	useEffect(() => {
-		if (!state.isFocusMode) {
-			return;
-		}
-
-		const updateFocusWidth = () => {
-			const currentNote = noteRef.current;
-			if (!currentNote) {
-				return;
-			}
-
-			const focusWidth = getMaxAllowedEditorWidth();
-			setEditorWidth(focusWidth);
-			applyEditorWidth(focusWidth);
+		const updateDesktopScreenState = () => {
+			setIsDesktopScreen(window.innerWidth >= 1024);
+			setIsMobileScreen(window.innerWidth < 768);
 		};
 
-		updateFocusWidth();
-		window.addEventListener("resize", updateFocusWidth);
-
-		return () => {
-			window.removeEventListener("resize", updateFocusWidth);
-		};
-	}, [applyEditorWidth, state.isFocusMode]);
+		updateDesktopScreenState();
+		window.addEventListener("resize", updateDesktopScreenState);
+		return () => window.removeEventListener("resize", updateDesktopScreenState);
+	}, []);
 
 	useEffect(() => {
 		const handleGlobalUndoRedo = (event: KeyboardEvent) => {
@@ -1749,9 +1779,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 					<FileText className="h-8 w-8" style={{ color: "var(--text-tertiary)" }} />
 				</div>
 				<div className="max-w-[32rem] px-6 text-center">
-					<h1
-						className="text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]"
-						style={{ color: "var(--text-primary)" }}>
+					<h1 className="text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]" style={{ color: "var(--text-primary)" }}>
 						{workspaceName}
 					</h1>
 					<p className="text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -1777,9 +1805,11 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 
 	const isNoteHydrating = loading && Boolean(note);
 	const marqueeRect = marqueeSelection ? getRectFromMarquee(marqueeSelection) : null;
+	const breadcrumbSegments = buildBreadcrumbSegments(note);
 
 	return (
 		<div
+			ref={focusModeRootRef}
 			className={`flex flex-1 overflow-hidden fade-in ${state.isFocusMode ? "stacknote-focus-mode" : ""}`}
 			style={{
 				backgroundColor: "var(--bg-app)",
@@ -1788,7 +1818,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 				willChange: "auto",
 			}}>
 			{/* Main editor area */}
-			<div ref={mainScrollRef} className="flex flex-1 flex-col overflow-y-auto" style={{}}>
+			<div ref={mainScrollRef} className="stacknote-mobile-bottom-space flex flex-1 flex-col overflow-y-auto" style={{}}>
 				{/* Note header bar */}
 				<div className="flex h-9 shrink-0 items-center justify-between px-4" style={{ borderBottom: "1px solid var(--border-default)" }}>
 					<div className="flex items-center gap-2">
@@ -1801,7 +1831,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 							</button>
 						)}
 						<div className="flex items-center gap-1 text-xs min-w-0" style={{ color: "var(--text-tertiary)" }}>
-							<span
+							<div
 								className="min-w-0"
 								style={{
 									overflow: "hidden",
@@ -1810,24 +1840,23 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 									display: "inline-block",
 									maxWidth: "calc(100vw - 280px)",
 								}}>
-								{workspaceName}
-								{note.folder && <> / {note.folder.name}</>}
-								<> / </>
-								<span style={{ color: "var(--text-secondary)" }}>{note.title || "Untitled"}</span>
-							</span>
+								<Breadcrumb segments={breadcrumbSegments} />
+							</div>
 						</div>
 					</div>
 					<div className="flex items-center gap-2">
 						<SaveIndicator status={saveStatus} />
-						<button
-							type="button"
-							onClick={openVersionsDialog}
-							disabled={state.isFocusMode}
-							className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${state.isFocusMode ? "cursor-not-allowed opacity-40" : "hover:bg-[#1a1a1a]"}`}
-							title={state.isFocusMode ? "History is disabled in focus mode" : "View note history"}>
-							<History className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-							<span style={{ color: "var(--text-tertiary)" }}>History</span>
-						</button>
+						{!isMobileScreen && (
+							<button
+								type="button"
+								onClick={openVersionsDialog}
+								disabled={state.isFocusMode}
+								className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${state.isFocusMode ? "cursor-not-allowed opacity-40" : "hover:bg-[#1a1a1a]"}`}
+								title={state.isFocusMode ? "History is disabled in focus mode" : "View note history"}>
+								<History className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+								<span style={{ color: "var(--text-tertiary)" }}>History</span>
+							</button>
+						)}
 						<button
 							type="button"
 							onClick={() => editorRef.current?.undo()}
@@ -1844,6 +1873,16 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 							title="Redo (Ctrl+Y)">
 							<Redo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
 						</button>
+						{isDesktopScreen ? (
+							<button
+								type="button"
+								onClick={handleToggleFocusMode}
+								className={`flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 ${state.isFocusMode ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
+								title={state.isFocusMode ? "Exit focus mode" : "Enter focus mode"}
+								aria-pressed={state.isFocusMode}>
+								<Brain className="h-3.5 w-3.5" style={{ color: state.isFocusMode ? "var(--sn-accent)" : "var(--text-tertiary)" }} />
+							</button>
+						) : null}
 						<button
 							type="button"
 							onClick={handleToggleAIPanel}
@@ -1858,23 +1897,12 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 								AI
 							</span>
 						</button>
-						<button
-							type="button"
-							onClick={handleToggleFocusMode}
-							className={`flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 ${state.isFocusMode ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
-							title={state.isFocusMode ? "Exit focus mode" : "Enter focus mode"}
-							aria-pressed={state.isFocusMode}>
-							{state.isFocusMode ? (
-								<Minimize2 className="h-3.5 w-3.5" style={{ color: "var(--sn-accent)" }} />
-							) : (
-								<Crosshair className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-							)}
-						</button>
 						<NoteActionsMenu
 							type="note"
 							align="end"
 							disabled={state.isFocusMode}
 							onChangeIcon={() => setEmojiPickerOpen(true)}
+							onViewHistory={isMobileScreen ? openVersionsDialog : undefined}
 							onDuplicate={handleDuplicate}
 							onSaveVersion={() => void handleManualVersion()}
 							saveVersionDisabled={isCreatingManualVersion || !isOnline}
@@ -1898,14 +1926,7 @@ export function NoteWorkspace({ activeNoteId, workspaceId, workspaceName, onNote
 					/>
 
 					{/* Emoji icon & title row */}
-					<div
-						className="mb-2 flex items-start gap-3 transition-[opacity,transform] duration-200"
-						style={{
-							opacity: state.isFocusMode ? 0 : 1,
-							transform: state.isFocusMode ? "translateY(-8px)" : "translateY(0)",
-							pointerEvents: state.isFocusMode ? "none" : undefined,
-						}}
-						aria-hidden={state.isFocusMode}>
+					<div className="mb-2 flex items-start gap-3" style={{ pointerEvents: state.isFocusMode ? "none" : undefined }}>
 						{/* Emoji selector button */}
 						<div ref={emojiWrapperRef} className="relative mt-1 shrink-0">
 							<button

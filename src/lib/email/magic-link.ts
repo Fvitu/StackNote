@@ -14,8 +14,8 @@ export function buildMagicLinkEmail({ url, host, email }: BuildMagicLinkEmailPar
 	const safeEmail = escapeHtml(email);
 	const year = new Date().getFullYear();
 
-  const logoUrl = `https://${safeHost}/StackNote.png`;
-  const logoMarkup = `<a href="https://${safeHost}" target="_blank">
+	const logoUrl = `https://${safeHost}/StackNote.png`;
+	const logoMarkup = `<a href="https://${safeHost}" target="_blank">
   <img src="${logoUrl}" alt="StackNote" width="52" height="52" style="display: block; width: 52px; height: 52px; margin: 0 auto 12px; border: 0;" /></a>`;
 
 	const html = `<!DOCTYPE html>

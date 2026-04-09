@@ -19,6 +19,7 @@ import type { QuizQuestion } from "@/lib/quiz";
 import { fetchJson } from "@/lib/api-client";
 import { readErrorMessage, readJsonResponse } from "@/lib/http";
 import { notifyAiUsageChanged } from "@/lib/ai-usage-events";
+import { clearPendingAiPrompt, readPendingAiPrompt } from "@/lib/pending-ai-prompt";
 import { queryKeys } from "@/lib/query-keys";
 
 export interface AISidePanelProps {
@@ -246,6 +247,7 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 	const sessionStateCacheRef = useRef(new Map<string, CachedChatSessionState>());
 	const sessionLoadRequestIdRef = useRef(0);
 	const suppressSessionHydrationRef = useRef(false);
+	const consumedPendingPromptKeyRef = useRef<string | null>(null);
 
 	const settingsQuery = useQuery({
 		queryKey: queryKeys.settings,
@@ -316,7 +318,7 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 		setAvailableNotes(nextAvailableNotes);
 		setSelectedNoteIds((previousSelection) => normalizeSelection(previousSelection, nextAvailableNotes, noteId));
 		setNotesLoading(contextNotesQuery.isLoading);
-		setNotesError(contextNotesQuery.isError ? contextNotesQuery.error?.message ?? "Failed to load notes" : null);
+		setNotesError(contextNotesQuery.isError ? (contextNotesQuery.error?.message ?? "Failed to load notes") : null);
 	}, [contextNotesQuery.data?.notes, contextNotesQuery.error?.message, contextNotesQuery.isError, contextNotesQuery.isLoading, noteId, noteTitle]);
 
 	const normalizeCachedSelection = useCallback(
@@ -412,10 +414,10 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 				}
 				if (requestId !== sessionLoadRequestIdRef.current) return;
 				const shouldPreserveOptimisticMessages = suppressSessionHydrationRef.current && sessionId === activeSessionIdRef.current;
-				const nextSelection = normalizeCachedSelection(
-					data.session.contextNoteIds.length > 0 ? data.session.contextNoteIds : [noteId],
-				);
-				const nextMode = readStoredContextSelectionMode(workspaceId, sessionId) ?? inferContextSelectionMode(data.session, nextSelection, availableNotesRef.current, noteId);
+				const nextSelection = normalizeCachedSelection(data.session.contextNoteIds.length > 0 ? data.session.contextNoteIds : [noteId]);
+				const nextMode =
+					readStoredContextSelectionMode(workspaceId, sessionId) ??
+					inferContextSelectionMode(data.session, nextSelection, availableNotesRef.current, noteId);
 				upsertSession(data.session);
 				sessionStateCacheRef.current.set(sessionId, {
 					session: data.session,
@@ -744,7 +746,8 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 				messagesSessionIdRef.current = createdSession.id;
 			}
 			setError(null);
-			const userMessage: Message = { id: `user-${Date.now()}`, role: "user", content: content.trim(), timestamp: new Date() };
+			const userMessageId = `user-${Date.now()}`;
+			const userMessage: Message = { id: userMessageId, role: "user", content: content.trim(), timestamp: new Date() };
 			setMessages((prev) => [...prev, userMessage]);
 			setInput("");
 			setIsLoading(true);
@@ -767,6 +770,10 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 					}),
 				});
 				if (!response.ok) throw new Error(await readErrorMessage(response, "Failed to get response"));
+				const ragCount = Number(response.headers.get("x-stacknote-rag-count") ?? "0");
+				if (ragCount > 0) {
+					setMessages((prev) => prev.map((message) => (message.id === userMessageId ? { ...message, ragCount } : message)));
+				}
 				const reader = response.body?.getReader();
 				const decoder = new TextDecoder();
 				let fullContent = "";
@@ -791,6 +798,28 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 		},
 		[activeSessionId, createSession, input, isConversationLocked, model, noteContent, noteId, noteTitle, selectedNoteIds],
 	);
+
+	useEffect(() => {
+		if (!isOpen || !hasResolvedInitialSessionLoad || isLoading) {
+			return;
+		}
+
+		const pendingPrompt = readPendingAiPrompt(noteId);
+		if (!pendingPrompt) {
+			consumedPendingPromptKeyRef.current = null;
+			return;
+		}
+
+		const pendingKey = `${pendingPrompt.noteId}:${pendingPrompt.createdAt}`;
+		if (consumedPendingPromptKeyRef.current === pendingKey) {
+			return;
+		}
+
+		consumedPendingPromptKeyRef.current = pendingKey;
+		setInput(pendingPrompt.prompt);
+		clearPendingAiPrompt();
+		void handleSubmit(pendingPrompt.prompt);
+	}, [handleSubmit, hasResolvedInitialSessionLoad, isLoading, isOpen, noteId]);
 
 	const handleKeyDown = (event: React.KeyboardEvent) => {
 		if (event.key === "Enter" && !event.shiftKey) {

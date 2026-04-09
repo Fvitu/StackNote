@@ -11,11 +11,7 @@ export async function GET() {
 	const userId = session.user.id;
 
 	try {
-		const [workspace, settings, aiUsage] = await Promise.all([
-			getCurrentWorkspace(userId),
-			getUserSettings(userId),
-			getAiUsage(userId),
-		]);
+		const [workspace, settings, aiUsage] = await Promise.all([getCurrentWorkspace(userId), getUserSettings(userId), getAiUsage(userId)]);
 
 		if (!workspace) {
 			return NextResponse.json({ error: "Workspace not found" }, { status: 404 });

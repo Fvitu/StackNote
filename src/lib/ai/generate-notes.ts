@@ -25,7 +25,6 @@ Always produce a Markdown document with the following structure, in this exact o
 - Detect the language of the transcript automatically and produce the structured notes in that same language. Do not translate unless explicitly asked.
 - The section headings (Summary, Key Definitions, Formulas, Review Questions) should also be written in the transcript's language, not hardcoded in English.`;
 
-
 export async function generateStructuredNotes(transcript: string, lectureTitle?: string): Promise<string> {
 	const userMessage = `Convert the following lecture transcript into structured study notes.
 Lecture title: "${lectureTitle ?? "Untitled Lecture"}"
@@ -47,16 +46,13 @@ ${transcript.slice(0, 12000)}${transcript.length > 12000 ? "\n\n[transcript trun
 }
 
 interface BuildSystemPromptOptions {
-	contextLabel?: string
-	noteContent?: string
-	source?: "chat" | "ai-block"
+	contextLabel?: string;
+	noteContent?: string;
+	source?: "chat" | "ai-block" | "home";
+	hasWorkspaceContext?: boolean;
 }
 
-export function buildSystemPrompt({
-	contextLabel,
-	noteContent,
-	source = "chat",
-}: BuildSystemPromptOptions = {}): string {
+export function buildSystemPrompt({ contextLabel, noteContent, source = "chat", hasWorkspaceContext = false }: BuildSystemPromptOptions = {}): string {
 	const BASE_SYSTEM_PROMPT = `\
 You are Sage, the AI study assistant embedded in StackNote — a browser-based modular study workspace designed for students.
  
@@ -111,14 +107,13 @@ Always behave as if the student is actively studying. Be their knowledgeable, pa
 - Do not invent facts, citations, or sources. If uncertain, say so.
 - Do not answer questions about StackNote's internal implementation or codebase.`;
 
-	if (!noteContent) {
-		return (
-			BASE_SYSTEM_PROMPT +
-			`\n\n## Context\nNo note context has been provided. Answer the student's questions using your general knowledge, and encourage them to open a note for more contextual assistance.`
-		);
-	}
+	const noContextInstructions =
+		!noteContent && !hasWorkspaceContext
+			? `\n\n## Context\nNo note context has been provided. Answer the student's questions using your general knowledge, and encourage them to open a note for more contextual assistance.`
+			: "";
 
-	const contextSection = `\n\n## Active note context
+	const contextSection = noteContent
+		? `\n\n## Active note context
 The student has provided the following note content as context. This is their own study material — treat it as the primary source of truth for this session.
  
 **Context source:** ${contextLabel ?? "Selected note"}
@@ -132,6 +127,7 @@ ${noteContent.slice(0, 12000)}${noteContent.length > 12000 ? "\n\n[...note trunc
 - If the student asks something not covered in the note, you can supplement with general knowledge — but flag it clearly (e.g. "This isn't in your note, but generally...").
 - If asked to summarize, expand, or explain, operate on this note unless instructed otherwise.
 - Do not hallucinate content or fill in gaps with invented information from this note.`
+		: "";
 
 	const inlineAiInstructions =
 		source === "ai-block"
@@ -139,7 +135,15 @@ ${noteContent.slice(0, 12000)}${noteContent.length > 12000 ? "\n\n[...note trunc
 - The full note is editable context, not just the local block where you were invoked.
 - If the user asks to rewrite, reorganize, expand, or improve the note, you may operate on the entire note.
 - When a whole-note rewrite is requested, return the revised note content in Markdown, ready to insert back into the note.`
-			: ""
+			: "";
 
-	return BASE_SYSTEM_PROMPT + contextSection + inlineAiInstructions
+	const homeWidgetInstructions =
+		source === "home"
+			? `\n- You are operating from the Home dashboard quick ask widget.
+- Keep responses concise, practical, and easy to skim.
+- Prefer short plain-text paragraphs. Use short bullet lists only when they materially improve clarity.
+- Avoid Markdown headings, tables, and code blocks unless the student explicitly asks for them.`
+			: "";
+
+	return BASE_SYSTEM_PROMPT + noContextInstructions + contextSection + inlineAiInstructions + homeWidgetInstructions;
 }

@@ -1,28 +1,28 @@
-import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
-import { normalizeContextNoteIds } from "@/lib/ai-chat-sessions"
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { normalizeContextNoteIds } from "@/lib/ai-chat-sessions";
 
 interface UpdateSessionBody {
-	title?: string
-	noteId?: string
-	contextNoteIds?: unknown
+	title?: string;
+	noteId?: string;
+	contextNoteIds?: unknown;
 }
 
 function jsonError(message: string, status: number) {
-	return NextResponse.json({ error: message }, { status })
+	return NextResponse.json({ error: message }, { status });
 }
 
 function mapSession(session: {
-	id: string
-	title: string
-	workspaceId: string
-	noteId: string | null
-	contextNoteIds: string[]
-	lastMessageAt: Date | null
-	createdAt: Date
-	updatedAt: Date
-	_count: { messages: number }
+	id: string;
+	title: string;
+	workspaceId: string;
+	noteId: string | null;
+	contextNoteIds: string[];
+	lastMessageAt: Date | null;
+	createdAt: Date;
+	updatedAt: Date;
+	_count: { messages: number };
 }) {
 	return {
 		id: session.id,
@@ -34,19 +34,18 @@ function mapSession(session: {
 		createdAt: session.createdAt,
 		updatedAt: session.updatedAt,
 		messageCount: session._count.messages,
-	}
+	};
 }
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-	const session = await auth()
+	const session = await auth();
 	if (!session?.user?.id) {
-		return jsonError("Unauthorized", 401)
+		return jsonError("Unauthorized", 401);
 	}
 
-
-	const { id } = await params
+	const { id } = await params;
 	if (!id) {
-		return jsonError("Session id is required", 400)
+		return jsonError("Session id is required", 400);
 	}
 
 	const aiSession = await prisma.aIChatSession.findFirst({
@@ -69,10 +68,10 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
 				},
 			},
 		},
-	})
+	});
 
 	if (!aiSession) {
-		return jsonError("Chat session not found", 404)
+		return jsonError("Chat session not found", 404);
 	}
 
 	const messages = await prisma.aIMessage.findMany({
@@ -88,7 +87,7 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
 			model: true,
 			createdAt: true,
 		},
-	})
+	});
 
 	return NextResponse.json({
 		session: mapSession(aiSession),
@@ -99,31 +98,30 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
 			model: message.model,
 			timestamp: message.createdAt,
 		})),
-	})
+	});
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-	const session = await auth()
+	const session = await auth();
 	if (!session?.user?.id) {
-		return jsonError("Unauthorized", 401)
+		return jsonError("Unauthorized", 401);
 	}
 
-
-	const { id } = await params
+	const { id } = await params;
 	if (!id) {
-		return jsonError("Session id is required", 400)
+		return jsonError("Session id is required", 400);
 	}
 
-	let body: UpdateSessionBody
+	let body: UpdateSessionBody;
 	try {
-		body = (await req.json()) as UpdateSessionBody
+		body = (await req.json()) as UpdateSessionBody;
 	} catch {
-		return jsonError("Invalid request body", 400)
+		return jsonError("Invalid request body", 400);
 	}
 
-	const title = body.title?.trim()
-	const noteId = body.noteId?.trim()
-	const normalizedContextNoteIds = normalizeContextNoteIds(body.contextNoteIds)
+	const title = body.title?.trim();
+	const noteId = body.noteId?.trim();
+	const normalizedContextNoteIds = normalizeContextNoteIds(body.contextNoteIds);
 
 	const existingSession = await prisma.aIChatSession.findFirst({
 		where: {
@@ -133,10 +131,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 		select: {
 			id: true,
 		},
-	})
+	});
 
 	if (!existingSession) {
-		return jsonError("Chat session not found", 404)
+		return jsonError("Chat session not found", 404);
 	}
 
 	const updatedSession = await prisma.aIChatSession.update({
@@ -161,21 +159,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 				},
 			},
 		},
-	})
+	});
 
-	return NextResponse.json({ session: mapSession(updatedSession) })
+	return NextResponse.json({ session: mapSession(updatedSession) });
 }
 
 export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-	const session = await auth()
+	const session = await auth();
 	if (!session?.user?.id) {
-		return jsonError("Unauthorized", 401)
+		return jsonError("Unauthorized", 401);
 	}
 
-
-	const { id } = await params
+	const { id } = await params;
 	if (!id) {
-		return jsonError("Session id is required", 400)
+		return jsonError("Session id is required", 400);
 	}
 
 	const result = await prisma.aIChatSession.deleteMany({
@@ -183,11 +180,11 @@ export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id:
 			id,
 			userId: session.user.id,
 		},
-	})
+	});
 
 	if (result.count === 0) {
-		return jsonError("Chat session not found", 404)
+		return jsonError("Chat session not found", 404);
 	}
 
-	return NextResponse.json({ ok: true })
+	return NextResponse.json({ ok: true });
 }

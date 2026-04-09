@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Folder, FileText, ChevronRight, MoreHorizontal, Smile, Pencil, Copy, Trash2, FilePlus, FolderPlus } from "lucide-react";
+import { Folder, FileText, ChevronRight, MoreHorizontal } from "lucide-react";
+import { NoteActionsMenu } from "./NoteActionsMenu";
 
 interface SidebarItemProps {
 	id: string;
 	name: string;
 	type: "folder" | "note";
+	variant?: "default" | "home-card";
 	emoji?: string | null;
 	depth: number;
 	isExpanded?: boolean;
@@ -39,114 +41,93 @@ interface SidebarItemProps {
 }
 
 export function SidebarItem({
-  id,
-  name,
-  type,
-  emoji,
-  depth,
-  isExpanded,
-  isActive,
-  isRenaming,
-  onToggle,
-  onClick,
-  onMouseEnter,
-  onDoubleClick,
-  onContextMenu,
-  onMoreClick, // Deprecated
-  onRename,
-  onCancelRename,
-  draggable,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragLeave,
-  isDragOver,
-  menuActions,
+	id,
+	name,
+	type,
+	variant = "default",
+	emoji,
+	depth,
+	isExpanded,
+	isActive,
+	isRenaming,
+	onToggle,
+	onClick,
+	onMouseEnter,
+	onDoubleClick,
+	onContextMenu,
+	onMoreClick, // Deprecated
+	onRename,
+	onCancelRename,
+	draggable,
+	onDragStart,
+	onDragOver,
+	onDrop,
+	onDragLeave,
+	isDragOver,
+	menuActions,
 }: SidebarItemProps) {
-  const [editName, setEditName] = useState(name);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+	const [editName, setEditName] = useState(name);
+	const inputRef = useRef<HTMLInputElement>(null);
+	const isHomeCardVariant = variant === "home-card";
 
-  useEffect(() => {
-    if (isRenaming && inputRef.current) {
-      setEditName(name);
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [isRenaming, name]);
+	useEffect(() => {
+		if (isRenaming && inputRef.current) {
+			const animationFrame = window.requestAnimationFrame(() => {
+				setEditName(name);
+				inputRef.current?.focus();
+				inputRef.current?.select();
+			});
 
-  useEffect(() => {
-    if (!isMenuOpen) {
-      return;
-    }
+			return () => {
+				window.cancelAnimationFrame(animationFrame);
+			};
+		}
+	}, [isRenaming, name]);
 
-    const handlePointerDown = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsMenuOpen(false);
-      }
-    };
+	const handleRenameSubmit = () => {
+		const trimmed = editName.trim();
+		if (trimmed && trimmed !== name) {
+			onRename?.(trimmed);
+		} else {
+			onCancelRename?.();
+		}
+	};
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsMenuOpen(false);
-      }
-    };
+	const handleKeyDown = (e: React.KeyboardEvent) => {
+		if (e.key === "Enter") {
+			handleRenameSubmit();
+		} else if (e.key === "Escape") {
+			onCancelRename?.();
+		}
+	};
 
-    window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
+	const getBgColor = () => {
+		if (isDragOver) return "rgba(124, 106, 255, 0.12)";
+		if (isActive) return isHomeCardVariant ? "rgba(124, 106, 255, 0.08)" : "var(--bg-active)";
+		return undefined;
+	};
 
-    return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isMenuOpen]);
+	const getBorderLeft = () => {
+		if (isDragOver) return "2px solid var(--sn-accent)";
+		if (isActive) return "2px solid var(--sn-accent)";
+		return "2px solid transparent";
+	};
 
-  const handleRenameSubmit = () => {
-    const trimmed = editName.trim();
-    if (trimmed && trimmed !== name) {
-      onRename?.(trimmed);
-    } else {
-      onCancelRename?.();
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleRenameSubmit();
-    } else if (e.key === "Escape") {
-      onCancelRename?.();
-    }
-  };
-
-  const runMenuAction = (action?: () => void) => {
-    if (!action) {
-      return;
-    }
-
-    setIsMenuOpen(false);
-    action();
-  };
-
-  const getBgColor = () => {
-    if (isDragOver) return "var(--accent-muted)";
-    if (isActive) return "var(--bg-active)";
-    return undefined;
-  };
-
-  const getBorderLeft = () => {
-    if (isDragOver) return "2px solid var(--sn-accent)";
-    if (isActive) return "2px solid var(--sn-accent)";
-    return "2px solid transparent";
-  };
-
-  return (
+	return (
 		<div
-			className="group/sidebar-item mb-0.5 flex h-7 cursor-pointer items-center gap-1 rounded-[var(--sn-radius-sm)] pr-1 smooth-bg smooth-border item-enter"
+			className={`group/sidebar-item mb-0.5 flex cursor-pointer items-center gap-1 smooth-bg smooth-border item-enter ${
+				isHomeCardVariant
+					? "min-h-[36px] rounded-lg px-2 py-1.5 transition-all duration-200 hover:bg-[#1a1a1a]"
+					: "h-7 rounded-[var(--sn-radius-sm)] pr-1"
+			}`}
 			style={{
-				paddingLeft: `${8 + depth * 12}px`,
+				paddingLeft: isHomeCardVariant ? `${8 + depth * 14}px` : `${8 + depth * 12}px`,
 				backgroundColor: getBgColor(),
 				borderLeft: getBorderLeft(),
+				userSelect: isRenaming ? "text" : "none",
+				WebkitUserSelect: isRenaming ? "text" : "none",
+				WebkitTouchCallout: "none",
+				touchAction: "pan-y",
 			}}
 			draggable={draggable}
 			onDragStart={draggable ? (e) => onDragStart?.(e, id) : undefined}
@@ -171,10 +152,14 @@ export function SidebarItem({
 			onDragLeave={type === "folder" ? onDragLeave : undefined}
 			onMouseEnter={(e) => {
 				onMouseEnter?.();
-				if (!isActive && !isDragOver) (e.currentTarget as HTMLElement).style.backgroundColor = "var(--bg-hover)";
+				if (!isHomeCardVariant && !isActive && !isDragOver) {
+					(e.currentTarget as HTMLElement).style.backgroundColor = "var(--bg-hover)";
+				}
 			}}
 			onMouseLeave={(e) => {
-				if (!isActive && !isDragOver) (e.currentTarget as HTMLElement).style.backgroundColor = "";
+				if (!isHomeCardVariant && !isActive && !isDragOver) {
+					(e.currentTarget as HTMLElement).style.backgroundColor = "";
+				}
 			}}
 			onClick={onClick}
 			onDoubleClick={onDoubleClick}
@@ -188,7 +173,7 @@ export function SidebarItem({
 					}}
 					className="flex h-4 w-4 shrink-0 items-center justify-center">
 					<ChevronRight
-						className="h-3 w-3 transition-transform duration-150"
+						className={`${isHomeCardVariant ? "h-3.5 w-3.5" : "h-3 w-3"} transition-transform duration-150`}
 						style={{
 							color: "var(--text-tertiary)",
 							transform: isExpanded ? "rotate(90deg)" : undefined,
@@ -201,11 +186,11 @@ export function SidebarItem({
 
 			{/* Icon */}
 			{type === "folder" ? (
-				<Folder className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--text-tertiary)" }} />
+				<Folder className={`${isHomeCardVariant ? "h-4 w-4 opacity-70" : "h-3.5 w-3.5"} shrink-0`} style={{ color: "var(--text-tertiary)" }} />
 			) : emoji ? (
-				<span className="shrink-0 text-sm leading-none">{emoji}</span>
+				<span className="shrink-0 text-sm leading-none opacity-70">{emoji}</span>
 			) : (
-				<FileText className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--text-tertiary)" }} />
+				<FileText className={`${isHomeCardVariant ? "h-4 w-4 opacity-70" : "h-3.5 w-3.5"} shrink-0`} style={{ color: "var(--text-tertiary)" }} />
 			)}
 
 			{/* Name */}
@@ -220,7 +205,9 @@ export function SidebarItem({
 					className="ml-1 flex-1 rounded-[var(--sn-radius-sm)] border-0 bg-[#1a1a1a] px-1 py-0 text-xs text-[#e8e8e8] outline-none focus:ring-2 focus:ring-[var(--sn-accent)]"
 				/>
 			) : (
-				<span className="ml-1 flex-1 truncate text-xs" style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)" }}>
+				<span
+					className={`ml-1 flex-1 truncate select-none ${isHomeCardVariant ? "text-sm" : "text-xs"}`}
+					style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)" }}>
 					{name}
 				</span>
 			)}
@@ -229,105 +216,18 @@ export function SidebarItem({
 			{!isRenaming &&
 				(menuActions || onMoreClick) &&
 				(menuActions ? (
-					<div ref={menuRef} className="relative shrink-0">
-						<button
-							type="button"
-							onClick={(e) => {
-								e.stopPropagation();
-								setIsMenuOpen((value) => !value);
-							}}
-							className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--sn-radius-sm)] opacity-0 pointer-events-none transition-opacity duration-100 group-hover/sidebar-item:opacity-100 group-hover/sidebar-item:pointer-events-auto hover:bg-[var(--bg-active)]"
-							data-popup-open={isMenuOpen ? "" : undefined}
-							style={{ color: "var(--text-tertiary)" }}>
-							<MoreHorizontal className="h-3.5 w-3.5" />
-						</button>
-
-						{isMenuOpen && (
-							<div
-								role="menu"
-								onClick={(event) => event.stopPropagation()}
-								className="absolute right-0 top-[calc(100%+0.375rem)] z-50 min-w-[168px] rounded-lg p-1 shadow-md ring-1 ring-foreground/10 fade-in"
-								style={{
-									backgroundColor: "var(--bg-hover)",
-									border: "1px solid var(--border-strong)",
-								}}>
-								{type === "note" && menuActions.onChangeIcon && (
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runMenuAction(menuActions.onChangeIcon)}
-										className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-										style={{ color: "var(--text-primary)" }}>
-										<Smile className="h-3.5 w-3.5" />
-										Change Icon
-									</button>
-								)}
-
-								{menuActions.onRename && (
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runMenuAction(menuActions.onRename)}
-										className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-										style={{ color: "var(--text-primary)" }}>
-										<Pencil className="h-3.5 w-3.5" />
-										Rename
-									</button>
-								)}
-
-								{type === "folder" && menuActions.onNewNote && (
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runMenuAction(menuActions.onNewNote)}
-										className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-										style={{ color: "var(--text-primary)" }}>
-										<FilePlus className="h-3.5 w-3.5" />
-										New Note
-									</button>
-								)}
-
-								{type === "folder" && menuActions.onNewFolder && (
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runMenuAction(menuActions.onNewFolder)}
-										className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-										style={{ color: "var(--text-primary)" }}>
-										<FolderPlus className="h-3.5 w-3.5" />
-										New Folder
-									</button>
-								)}
-
-								{type === "note" && menuActions.onDuplicate && (
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runMenuAction(menuActions.onDuplicate)}
-										className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-										style={{ color: "var(--text-primary)" }}>
-										<Copy className="h-3.5 w-3.5" />
-										Duplicate
-									</button>
-								)}
-
-								{menuActions.onDelete && (
-									<>
-										<div className="-mx-1 my-1 h-px bg-border" />
-										<button
-											type="button"
-											role="menuitem"
-											onClick={() => runMenuAction(menuActions.onDelete)}
-											className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-destructive/10"
-											style={{ color: "var(--text-primary)" }}>
-											<Trash2 className="h-3.5 w-3.5" />
-											{type === "note" ? "Remove" : "Delete"}
-										</button>
-									</>
-								)}
-							</div>
-						)}
-					</div>
+					<NoteActionsMenu
+						type={type}
+						triggerIcon={<MoreHorizontal className="h-3.5 w-3.5" />}
+						triggerClassName="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--sn-radius-sm)] opacity-0 pointer-events-none transition-opacity duration-100 group-hover/sidebar-item:opacity-100 group-hover/sidebar-item:pointer-events-auto hover:bg-[var(--bg-active)]"
+						contentClassName="w-auto min-w-[168px]"
+						onChangeIcon={menuActions.onChangeIcon}
+						onRename={menuActions.onRename}
+						onDuplicate={menuActions.onDuplicate}
+						onDelete={menuActions.onDelete}
+						onNewNote={menuActions.onNewNote}
+						onNewFolder={menuActions.onNewFolder}
+					/>
 				) : (
 					<button
 						onClick={(e) => {
@@ -346,5 +246,8 @@ export function SidebarItem({
 					</button>
 				))}
 		</div>
-  );
+	);
 }
+
+
+

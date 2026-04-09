@@ -168,7 +168,7 @@ export function AppShellSkeleton({
 	const resolvedUserName = userName?.trim() || (userEmail?.trim() ? userEmail : "Workspace user");
 
 	return (
-		<div className="relative flex h-screen overflow-hidden" style={{ backgroundColor: "#000000" }}>
+		<div className="relative flex h-dvh min-h-0 overflow-hidden" style={{ backgroundColor: "#000000" }}>
 			<div
 				className="hidden md:flex md:h-full md:w-[240px] md:flex-col"
 				style={{ backgroundColor: "var(--bg-sidebar)", borderRight: "1px solid var(--border-default)" }}>

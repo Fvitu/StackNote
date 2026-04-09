@@ -311,14 +311,13 @@ function LoginPageContent() {
 					By signing in, you agree to keep your notes secure on this device.
 				</p>
 
-				<div className="mt-6 pt-6 border-t border-[rgba(255,255,255,0.06)]">
+				<div className="mt-6 pt-6 border-t border-[rgba(255,255,255,0.0hpnois  grn6)]">
 					<GuestInfo>Guest sessions are temporary. Notes and uploaded files are deleted after 24 hours of inactivity.</GuestInfo>
 				</div>
 			</div>
 		</div>
 	);
 }
-
 export default function LoginPage() {
 	return <LoginPageContent />;
 }

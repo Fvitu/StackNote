@@ -1,9 +1,9 @@
-import { PrismaClient } from "@/generated/prisma/client"
-import { PrismaPg } from "@prisma/adapter-pg"
+import { PrismaClient } from "@/generated/prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
-}
+	prisma: PrismaClient | undefined;
+};
 
 function getEnvValue(value: string | undefined): string | undefined {
 	if (!value) {
@@ -58,16 +58,13 @@ function resolveDatabaseConnectionString(): string {
 }
 
 function createPrismaClient() {
-  const adapter = new PrismaPg({ connectionString: resolveDatabaseConnectionString() });
-  return new PrismaClient({
-    adapter,
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
-        : ["error"],
-  })
+	const adapter = new PrismaPg({ connectionString: resolveDatabaseConnectionString() });
+	return new PrismaClient({
+		adapter,
+		log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+	});
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient()
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;

@@ -1,17 +1,17 @@
-"use client"
+"use client";
 
-import { Check, Loader2, AlertCircle, WifiOff } from "lucide-react"
+import { Check, Loader2, AlertCircle, WifiOff } from "lucide-react";
 
 interface SaveIndicatorProps {
-	status: "idle" | "saving" | "saved" | "error" | "offline" | "syncing" | "synced"
+	status: "idle" | "saving" | "saved" | "error" | "offline" | "syncing" | "synced";
 }
 
 export function SaveIndicator({ status }: SaveIndicatorProps) {
-  if (status === "idle") return null
+	if (status === "idle") return null;
 
-  const mutedColor = "var(--text-tertiary)"
+	const mutedColor = "var(--text-tertiary)";
 
-  return (
+	return (
 		<div className="flex items-center gap-1.5 text-xs">
 			{status === "saving" && (
 				<>
@@ -50,5 +50,5 @@ export function SaveIndicator({ status }: SaveIndicatorProps) {
 				</>
 			)}
 		</div>
-  )
+	);
 }

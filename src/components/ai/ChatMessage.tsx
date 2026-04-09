@@ -17,6 +17,7 @@ export interface Message {
 	content: string;
 	timestamp: Date;
 	model?: string;
+	ragCount?: number;
 	usage?: {
 		inputTokens: number;
 		outputTokens: number;
@@ -69,7 +70,14 @@ export const ChatMessage = memo(function ChatMessage({ message, isStreaming, onA
 						color: "var(--text-primary)",
 					}}>
 					{isUser ? (
-						<p className="whitespace-pre-wrap">{message.content}</p>
+						<div>
+							<p className="whitespace-pre-wrap">{message.content}</p>
+							{message.ragCount && message.ragCount > 0 ? (
+								<p className="mt-2 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+									↗ Searched {message.ragCount} related note{message.ragCount === 1 ? "" : "s"}
+								</p>
+							) : null}
+						</div>
 					) : (
 						<div className="ai-message-content min-w-0">
 							{message.content ? (

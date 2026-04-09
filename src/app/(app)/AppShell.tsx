@@ -2,8 +2,10 @@
 
 import dynamic from "next/dynamic";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { PanelLeftOpen } from "lucide-react";
+import { SettingsDockProvider } from "@/contexts/SettingsDockContext";
 import { WorkspaceProvider } from "@/contexts/WorkspaceContext";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { MainContent } from "@/components/layout/MainContent";
@@ -11,10 +13,12 @@ import { AppShellSkeleton } from "@/components/layout/AppShellSkeleton";
 import { PomodoroWidget } from "@/components/pomodoro/PomodoroWidget";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { QuickNoteWidget } from "@/components/quick-note/QuickNoteWidget";
+import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKeyboardShortcut } from "@/hooks/useKeyboardShortcut";
 import { fetchJson } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
+import type { WorkspaceReorderPayload } from "@/lib/workspace-tree-view";
 import type { BootstrapResponse } from "@/lib/bootstrap";
 import type { WorkspaceTree, NoteTreeItem, FolderTreeItem } from "@/types";
 import {
@@ -46,8 +50,14 @@ interface AppShellProps {
 	};
 }
 
+function getNoteIdFromPathname(pathname: string) {
+	const match = /^\/note\/([^/?#]+)$/.exec(pathname);
+	return match ? decodeURIComponent(match[1]) : null;
+}
+
 function AppShellInner({ initialShell, children }: AppShellProps) {
 	const pathname = usePathname();
+	const searchParams = useSearchParams();
 	const router = useRouter();
 	const queryClient = useQueryClient();
 	const bootstrapQuery = useQuery({
@@ -79,8 +89,12 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 	const [isSettingsDockVisible, setIsSettingsDockVisible] = useState(false);
 	const [isMobileSidebarMode, setIsMobileSidebarMode] = useState(false);
 	const [canUseSidebarPreview, setCanUseSidebarPreview] = useState(false);
-	const { state, setActiveNote, toggleFolder, toggleSidebar, setSidebarOpen } = useWorkspace();
-	const isWorkspaceRoute = pathname === "/";
+	const { state, setActiveNote, expandFolder, toggleSidebar, setSidebarOpen } = useWorkspace();
+	const activeRouteNoteId = useMemo(() => getNoteIdFromPathname(pathname), [pathname]);
+	const requestedFolderId = pathname === "/" ? searchParams.get("folder")?.trim() || null : null;
+	const isHomeRoute = pathname === "/";
+	const isPlannerRoute = pathname === "/planner";
+	const isNoteRoute = Boolean(activeRouteNoteId);
 	const isSidebarVisible = state.isSidebarOpen && !state.isFocusMode;
 	const settingsDockWidth = 480;
 	const previousSidebarVisibleRef = useRef(isSidebarVisible);
@@ -103,21 +117,15 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 	}, [bootstrapData, queryClient]);
 
 	useEffect(() => {
-		const params = new URLSearchParams(window.location.search);
-		const noteId = params.get("note");
-		const folderId = params.get("folder");
+		setActiveNote(activeRouteNoteId);
+	}, [activeRouteNoteId, setActiveNote]);
 
-		if (noteId) {
-			setActiveNote(noteId);
+	useEffect(() => {
+		setActiveFolderId(requestedFolderId);
+		if (requestedFolderId) {
+			expandFolder(requestedFolderId);
 		}
-
-		if (folderId) {
-			setActiveFolderId(folderId);
-			toggleFolder(folderId);
-		}
-		// Intentionally run once to hydrate initial app state from URL.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	}, [expandFolder, requestedFolderId]);
 
 	useEffect(() => {
 		if (pathname !== "/") {
@@ -125,12 +133,6 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 		}
 
 		const params = new URLSearchParams(window.location.search);
-
-		if (state.activeNoteId) {
-			params.set("note", state.activeNoteId);
-		} else {
-			params.delete("note");
-		}
 
 		if (activeFolderId) {
 			params.set("folder", activeFolderId);
@@ -144,7 +146,7 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 		if (currentUrl !== nextUrl) {
 			window.history.replaceState(null, "", nextUrl);
 		}
-	}, [pathname, state.activeNoteId, activeFolderId]);
+	}, [pathname, activeFolderId]);
 
 	const fetchTree = useCallback(async () => {
 		if (!workspaceId) {
@@ -173,9 +175,23 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 		}
 	}, [isSidebarVisible]);
 
+	const openSettingsDock = useCallback(() => {
+		if (isMobileSidebarMode) {
+			setSidebarOpen(false);
+			setIsSidebarPreviewOpen(false);
+		}
+
+		setIsSettingsDockOpen(true);
+	}, [isMobileSidebarMode, setSidebarOpen]);
+
 	const toggleSettingsDock = useCallback(() => {
+		if (isMobileSidebarMode) {
+			setSidebarOpen(false);
+			setIsSidebarPreviewOpen(false);
+		}
+
 		setIsSettingsDockOpen((currentOpen) => !currentOpen);
-	}, []);
+	}, [isMobileSidebarMode, setSidebarOpen]);
 
 	useEffect(() => {
 		if (isSettingsDockOpen && !isSidebarVisible && !isMobileSidebarMode) {
@@ -190,13 +206,13 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 	}, [isSettingsDockOpen, isSidebarVisible]);
 
 	useEffect(() => {
-		if (previousSidebarVisibleRef.current && !isSidebarVisible) {
+		if (previousSidebarVisibleRef.current && !isSidebarVisible && !(isMobileSidebarMode && isSettingsDockOpen)) {
 			setIsSettingsDockOpen(false);
 			setIsSidebarPreviewOpen(false);
 		}
 
 		previousSidebarVisibleRef.current = isSidebarVisible;
-	}, [isSidebarVisible]);
+	}, [isMobileSidebarMode, isSettingsDockOpen, isSidebarVisible]);
 
 	useEffect(() => {
 		if (state.isSidebarOpen) {
@@ -242,6 +258,18 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 	}, [isSettingsDockMounted, isSettingsDockOpen, isSettingsDockVisible]);
 
 	useEffect(() => {
+		const handleOpenAccountDialog = () => {
+			setAccountDialogOpen(true);
+		};
+
+		window.addEventListener("stacknote:open-account-dialog", handleOpenAccountDialog as EventListener);
+
+		return () => {
+			window.removeEventListener("stacknote:open-account-dialog", handleOpenAccountDialog as EventListener);
+		};
+	}, []);
+
+	useEffect(() => {
 		if (!isSettingsDockOpen) {
 			return;
 		}
@@ -279,6 +307,18 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 	}, [isSettingsDockOpen]);
 
 	useEffect(() => {
+		const handleOpenSettingsDock = () => {
+			openSettingsDock();
+		};
+
+		window.addEventListener("stacknote:open-settings-dock", handleOpenSettingsDock);
+
+		return () => {
+			window.removeEventListener("stacknote:open-settings-dock", handleOpenSettingsDock);
+		};
+	}, [openSettingsDock]);
+
+	useEffect(() => {
 		if (typeof window === "undefined") return;
 
 		const mobileQuery = window.matchMedia("(max-width: 767px)");
@@ -305,6 +345,17 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 		setIsSidebarPreviewOpen(false);
 		setSidebarOpen(true);
 	}, [setSidebarOpen]);
+
+	const handleOpenNote = useCallback(
+		(noteId: string | null) => {
+			setActiveNote(noteId);
+			router.push(noteId ? `/note/${encodeURIComponent(noteId)}` : "/");
+			if (typeof window !== "undefined" && window.innerWidth < 768) {
+				setSidebarOpen(false);
+			}
+		},
+		[router, setActiveNote, setSidebarOpen],
+	);
 
 	const handleSidebarToggleButton = useCallback(() => {
 		if (isMobileSidebarMode) {
@@ -368,11 +419,11 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 					return note;
 				},
 				(newNote) => {
-					setActiveNote(newNote.id);
+					handleOpenNote(newNote.id);
 				},
 			);
 		},
-		[optimisticAction, setActiveNote, workspaceId],
+		[handleOpenNote, optimisticAction, workspaceId],
 	);
 
 	const handleCreateFolder = useCallback(
@@ -489,6 +540,22 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 		[optimisticAction],
 	);
 
+	const handleReorderTree = useCallback(
+		async (nextTree: WorkspaceTree, payload: WorkspaceReorderPayload) => {
+			return optimisticAction(
+				() => nextTree,
+				async () => {
+					await fetchJson(`/api/workspace/${workspaceId}/reorder`, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify(payload),
+					});
+				},
+			);
+		},
+		[optimisticAction, workspaceId],
+	);
+
 	const updateUserName = useCallback(
 		async (name: string) => {
 			await fetchJson<{ success: boolean }>("/api/user/name", {
@@ -554,12 +621,6 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 						tree,
 						onRefresh: fetchTree,
 						onSearchOpen: () => setSearchOpen(true),
-						onAccountOpen: () => {
-							setAccountDialogOpen(true);
-							if (typeof window !== "undefined" && (isMobileSidebarMode || window.innerWidth < 768)) {
-								setSidebarOpen(false);
-							}
-						},
 						onSettingsOpen: toggleSettingsDock,
 						isSettingsOpen: isSettingsDockOpen,
 						onCreateNote: handleCreateNote,
@@ -570,6 +631,7 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 						onRenameFolder: handleRenameFolder,
 						onMoveNote: handleMoveNote,
 						onMoveFolder: handleMoveFolder,
+						onReorderTree: handleReorderTree,
 						onFolderVisited: setActiveFolderId,
 					}
 				: null,
@@ -584,11 +646,10 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 			handleDeleteNote,
 			handleMoveFolder,
 			handleMoveNote,
+			handleReorderTree,
 			handleRenameFolder,
 			handleRenameNote,
-			isMobileSidebarMode,
 			isSettingsDockOpen,
-			setSidebarOpen,
 			toggleSettingsDock,
 			tree,
 			workspaceId,
@@ -608,7 +669,7 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 
 	if (bootstrapQuery.isError) {
 		return (
-			<div className="flex h-screen items-center justify-center" style={{ backgroundColor: "#000000", color: "var(--text-primary)" }}>
+			<div className="flex h-dvh items-center justify-center" style={{ backgroundColor: "#000000", color: "var(--text-primary)" }}>
 				<div className="space-y-4 text-center">
 					<p className="text-sm">Failed to load your workspace.</p>
 					<button
@@ -634,132 +695,146 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 	}
 
 	return (
-		<div className="relative flex h-screen overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
-			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && !state.isFocusMode && (
-				<div className="sidebar-preview-trigger" onMouseEnter={showSidebarPreview} aria-hidden="true" />
-			)}
-			{(isSidebarVisible || isSettingsDockMounted) && !isMobileSidebarMode && (
-				<div
-					className="fixed inset-y-0 left-0 z-50 flex overflow-hidden"
-					style={{
-						width: state.sidebarWidth,
-						transition: "width 280ms cubic-bezier(0.22, 1, 0.36, 1)",
-					}}
-					onMouseLeave={isSettingsDockMounted ? undefined : hideDockedPanels}>
-					<div className="h-full flex-shrink-0" style={{ width: state.sidebarWidth, minWidth: state.sidebarWidth }}>
-						<div className={`sidebar-surface ${isSidebarVisible || isSettingsDockOpen ? "sidebar-surface-open" : "sidebar-surface-closed"}`}>
-							<Sidebar {...sidebarProps} />
+		<SettingsDockProvider value={{ openSettingsDock, isSettingsDockOpen }}>
+			<div className="relative flex h-dvh min-h-0 overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
+				{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && !state.isFocusMode && (
+					<div className="sidebar-preview-trigger" onMouseEnter={showSidebarPreview} aria-hidden="true" />
+				)}
+				{(isSidebarVisible || isSettingsDockMounted) && !isMobileSidebarMode && (
+					<div
+						className="fixed inset-y-0 left-0 z-50 flex overflow-hidden"
+						style={{
+							width: state.sidebarWidth,
+							transition: "width 280ms cubic-bezier(0.22, 1, 0.36, 1)",
+						}}
+						onMouseLeave={isSettingsDockMounted ? undefined : hideDockedPanels}>
+						<div className="h-full flex-shrink-0" style={{ width: state.sidebarWidth, minWidth: state.sidebarWidth }}>
+							<div className={`sidebar-surface ${isSidebarVisible || isSettingsDockOpen ? "sidebar-surface-open" : "sidebar-surface-closed"}`}>
+								<Sidebar {...sidebarProps} />
+							</div>
 						</div>
-					</div>
-				</div>
-			)}
-			{isSettingsDockMounted && !isMobileSidebarMode && (
-				<div
-					ref={settingsDockRef}
-					className="fixed inset-y-0 z-[56] overflow-hidden"
-					style={{
-						left: state.sidebarWidth,
-						width: settingsDockWidth,
-						minWidth: settingsDockWidth,
-						boxShadow: "24px 0 48px rgba(0, 0, 0, 0.32)",
-						opacity: isSettingsDockVisible ? 1 : 0,
-						transform: isSettingsDockVisible ? "translateX(0)" : "translateX(-14px)",
-						pointerEvents: isSettingsDockVisible ? "auto" : "none",
-						willChange: "opacity, transform",
-						transition: `opacity ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1), transform ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
-					}}>
-					<SettingsPanel variant="dock" onClose={() => setIsSettingsDockOpen(false)} />
-				</div>
-			)}
-			{isMobileSidebarMode && isSidebarVisible && (
-				<>
-					<button type="button" className="sidebar-mobile-backdrop" onClick={toggleSidebar} aria-label="Close sidebar overlay" />
-					<div className="sidebar-mobile-layer" style={{ width: state.sidebarWidth }}>
-						<div className="sidebar-surface sidebar-surface-open sidebar-mobile-surface">
-							<Sidebar {...sidebarProps} />
-						</div>
-					</div>
-					{isSettingsDockMounted && (
-						<div
-							ref={settingsDockRef}
-							className="fixed inset-y-0 right-0 z-[56] overflow-hidden"
-							style={{
-								width: `calc(100vw - ${state.sidebarWidth}px)`,
-								opacity: isSettingsDockVisible ? 1 : 0,
-								transform: isSettingsDockVisible ? "translateX(0)" : "translateX(18px)",
-								pointerEvents: isSettingsDockVisible ? "auto" : "none",
-								willChange: "opacity, transform",
-								transition: `opacity ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1), transform ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
-							}}>
-							<SettingsPanel variant="dock" onClose={() => setIsSettingsDockOpen(false)} />
-						</div>
-					)}
-				</>
-			)}
-			{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && !isSettingsDockMounted && (
-				<div
-					className={`sidebar-preview-layer ${isSidebarPreviewOpen ? "sidebar-preview-layer-open" : ""}`}
-					style={{ width: state.sidebarWidth }}
-					onMouseEnter={showSidebarPreview}
-					onMouseLeave={hideSidebarPreview}
-					aria-hidden={!isSidebarPreviewOpen}>
-					<div className={`sidebar-surface sidebar-preview-surface ${isSidebarPreviewOpen ? "sidebar-surface-open" : "sidebar-surface-closed"}`}>
-						<Sidebar {...sidebarProps} />
-					</div>
-				</div>
-			)}
-			<div
-				className="flex min-w-0 flex-1 overflow-hidden"
-				style={{
-					backgroundColor: "var(--bg-app)",
-					paddingLeft: dockedContentOffset,
-					transition: "padding-left 280ms cubic-bezier(0.22, 1, 0.36, 1)",
-				}}>
-				{isWorkspaceRoute ? (
-					<MainContent
-						workspaceId={workspaceId}
-						workspaceName={currentWorkspaceName}
-						onNoteCreated={fetchTree}
-						onRefresh={fetchTree}
-						isSidebarOpen={isSidebarVisible}
-						onToggleSidebar={handleSidebarToggleButton}
-						tree={tree}
-					/>
-				) : (
-					<div className="flex min-w-0 flex-1 overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
-						{children}
 					</div>
 				)}
+				{isSettingsDockMounted && !isMobileSidebarMode && (
+					<div
+						ref={settingsDockRef}
+						className="fixed inset-y-0 z-[56] overflow-hidden"
+						style={{
+							left: state.sidebarWidth,
+							width: settingsDockWidth,
+							minWidth: settingsDockWidth,
+							boxShadow: "24px 0 48px rgba(0, 0, 0, 0.32)",
+							opacity: isSettingsDockVisible ? 1 : 0,
+							transform: isSettingsDockVisible ? "translateX(0)" : "translateX(-14px)",
+							pointerEvents: isSettingsDockVisible ? "auto" : "none",
+							willChange: "opacity, transform",
+							transition: `opacity ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1), transform ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+						}}>
+						<SettingsPanel variant="dock" onClose={() => setIsSettingsDockOpen(false)} />
+					</div>
+				)}
+				{isMobileSidebarMode && isSidebarVisible && (
+					<>
+						<button type="button" className="sidebar-mobile-backdrop" onClick={toggleSidebar} aria-label="Close sidebar overlay" />
+						<div className="sidebar-mobile-layer" style={{ width: state.sidebarWidth }}>
+							<div className="sidebar-surface sidebar-surface-open sidebar-mobile-surface">
+								<Sidebar {...sidebarProps} />
+							</div>
+						</div>
+					</>
+				)}
+				{isSettingsDockMounted && isMobileSidebarMode && (
+					<div
+						ref={settingsDockRef}
+						className="fixed inset-0 z-[56] overflow-hidden"
+						style={{
+							opacity: isSettingsDockVisible ? 1 : 0,
+							transform: isSettingsDockVisible ? "translateX(0)" : "translateX(-18px)",
+							pointerEvents: isSettingsDockVisible ? "auto" : "none",
+							willChange: "opacity, transform",
+							transition: `opacity ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1), transform ${SETTINGS_DOCK_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+						}}>
+						<SettingsPanel variant="dock" onClose={() => setIsSettingsDockOpen(false)} />
+					</div>
+				)}
+				{canUseSidebarPreview && !isMobileSidebarMode && !state.isSidebarOpen && !isSettingsDockMounted && (
+					<div
+						className={`sidebar-preview-layer ${isSidebarPreviewOpen ? "sidebar-preview-layer-open" : ""}`}
+						style={{ width: state.sidebarWidth }}
+						onMouseEnter={showSidebarPreview}
+						onMouseLeave={hideSidebarPreview}
+						aria-hidden={!isSidebarPreviewOpen}>
+						<div className={`sidebar-surface sidebar-preview-surface ${isSidebarPreviewOpen ? "sidebar-surface-open" : "sidebar-surface-closed"}`}>
+							<Sidebar {...sidebarProps} />
+						</div>
+					</div>
+				)}
+				<div
+					className="flex min-w-0 flex-1 overflow-hidden"
+					style={{
+						backgroundColor: "var(--bg-app)",
+						paddingLeft: dockedContentOffset,
+						transition: "padding-left 280ms cubic-bezier(0.22, 1, 0.36, 1)",
+					}}>
+					{isNoteRoute ? (
+						<MainContent
+							workspaceId={workspaceId}
+							workspaceName={currentWorkspaceName}
+							activeNoteId={activeRouteNoteId}
+							onNoteCreated={fetchTree}
+							onOpenNote={handleOpenNote}
+							onRefresh={fetchTree}
+							isSidebarOpen={isSidebarVisible}
+							onToggleSidebar={handleSidebarToggleButton}
+							tree={tree}
+						/>
+					) : (
+						<div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
+							{!isHomeRoute && !isPlannerRoute && !isSidebarVisible && !state.isFocusMode && (
+								<button
+									type="button"
+									onClick={handleSidebarToggleButton}
+									className="fixed z-40 flex h-7 w-7 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
+									style={{
+										left: "max(0.5rem, env(safe-area-inset-left))",
+										top: "max(0.5rem, env(safe-area-inset-top))",
+									}}
+									title="Open sidebar (Ctrl+\\)"
+									aria-label="Open sidebar">
+									<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
+								</button>
+							)}
+							{children}
+						</div>
+					)}
+				</div>
+				{!isHomeRoute && !isPlannerRoute ? (
+					<PomodoroWidget sidebarOffset={isSidebarVisible && !isMobileSidebarMode ? state.sidebarWidth + 24 : 24} />
+				) : null}
+				<InstallPrompt />
+				<SearchModalClient
+					workspaceId={workspaceId}
+					open={searchOpen}
+					onSelectNote={(id) => {
+						handleOpenNote(id);
+					}}
+					onClose={() => setSearchOpen(false)}
+				/>
+				<AccountDialogClient
+					open={accountDialogOpen}
+					userName={currentUserName}
+					userEmail={bootstrapData.auth.isGuestUser ? "" : bootstrapData.user.email}
+					workspaceName={currentWorkspaceName}
+					isGoogleUser={bootstrapData.auth.isGoogleUser}
+					isGuestUser={bootstrapData.auth.isGuestUser}
+					onClose={() => setAccountDialogOpen(false)}
+					onSaveUserName={updateUserName}
+					onSaveWorkspaceName={updateWorkspaceName}
+				/>
+				<NameCaptureDialogClient open={showNameDialog} onNameSubmit={handleNameSubmit} />
+				{!isHomeRoute && !isPlannerRoute ? <QuickNoteWidget userId={bootstrapData.user.id} /> : null}
 			</div>
-			<PomodoroWidget sidebarOffset={isSidebarVisible && !isMobileSidebarMode ? state.sidebarWidth + 24 : 24} />
-			<SearchModalClient
-				workspaceId={workspaceId}
-				open={searchOpen}
-				onSelectNote={(id) => {
-					setActiveNote(id);
-					if (pathname !== "/") {
-						router.push(`/?note=${encodeURIComponent(id)}`);
-					}
-					if (typeof window !== "undefined" && window.innerWidth < 768) {
-						toggleSidebar();
-					}
-				}}
-				onClose={() => setSearchOpen(false)}
-			/>
-			<AccountDialogClient
-				open={accountDialogOpen}
-				userName={currentUserName}
-				userEmail={bootstrapData.auth.isGuestUser ? "" : bootstrapData.user.email}
-				workspaceName={currentWorkspaceName}
-				isGoogleUser={bootstrapData.auth.isGoogleUser}
-				isGuestUser={bootstrapData.auth.isGuestUser}
-				onClose={() => setAccountDialogOpen(false)}
-				onSaveUserName={updateUserName}
-				onSaveWorkspaceName={updateWorkspaceName}
-			/>
-			<NameCaptureDialogClient open={showNameDialog} onNameSubmit={handleNameSubmit} />
-			<QuickNoteWidget userId={bootstrapData.user.id} />
-		</div>
+		</SettingsDockProvider>
 	);
 }
 

@@ -42,6 +42,109 @@ type MinimalBlock = {
 	children?: unknown;
 };
 
+const CONTENTLESS_BLOCK_TYPES = new Set(["imageMedia", "linkPreview", "pdfMedia", "audioMedia", "videoEmbed", "equation", "codeBlock", "aiBlock"]);
+
+function createSafeBlockId(): string {
+	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+		return crypto.randomUUID();
+	}
+
+	return `block-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function toSanitizedInlineContent(value: unknown): unknown[] | undefined {
+	if (typeof value === "string") {
+		return value.length > 0 ? [{ type: "text", text: value }] : [];
+	}
+
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+
+	const sanitized = value
+		.map((item) => {
+			if (typeof item === "string") {
+				return item.length > 0 ? { type: "text", text: item } : null;
+			}
+
+			if (!isPlainObject(item) || typeof item.type !== "string") {
+				return null;
+			}
+
+			const next: Record<string, unknown> = {
+				type: item.type,
+			};
+
+			if (typeof item.text === "string") {
+				next.text = item.text;
+			}
+
+			if (item.styles && isPlainObject(item.styles)) {
+				next.styles = item.styles;
+			}
+
+			if (item.props && isPlainObject(item.props)) {
+				next.props = item.props;
+			}
+
+			if (Array.isArray(item.content)) {
+				next.content = toSanitizedInlineContent(item.content);
+			}
+
+			return next;
+		})
+		.filter((item): item is Record<string, unknown> => item !== null);
+
+	return sanitized;
+}
+
+function sanitizeInitialBlock(block: unknown): Record<string, unknown> | null {
+	if (!isPlainObject(block) || typeof block.type !== "string") {
+		return null;
+	}
+
+	const next: Record<string, unknown> = {
+		...block,
+		id: typeof block.id === "string" && block.id.length > 0 ? block.id : createSafeBlockId(),
+		type: block.type,
+	};
+
+	if (CONTENTLESS_BLOCK_TYPES.has(block.type)) {
+		delete next.content;
+		delete next.children;
+	} else {
+		const sanitizedContent = toSanitizedInlineContent(block.content);
+		if (sanitizedContent !== undefined) {
+			next.content = sanitizedContent;
+		} else {
+			delete next.content;
+		}
+
+		if (Array.isArray(block.children)) {
+			next.children = block.children.map((child) => sanitizeInitialBlock(child)).filter((child): child is Record<string, unknown> => child !== null);
+		} else {
+			delete next.children;
+		}
+	}
+
+	if (next.props !== undefined && !isPlainObject(next.props)) {
+		delete next.props;
+	}
+
+	return next;
+}
+
+function getSafeInitialContent(content: unknown): unknown[] | undefined {
+	const normalized = normalizeBlockNoteContent(content);
+	if (!Array.isArray(normalized)) {
+		return undefined;
+	}
+
+	const sanitizedBlocks = normalized.map((block) => sanitizeInitialBlock(block)).filter((block): block is Record<string, unknown> => block !== null);
+
+	return sanitizedBlocks.length > 0 ? sanitizedBlocks : undefined;
+}
+
 function sanitizePastedUrl(value: string): string {
 	const trimmed = value.replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
 	return trimmed.replace(/^<|>$/g, "");
@@ -737,9 +840,11 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 		[],
 	);
 
+	const safeInitialContent = useMemo(() => getSafeInitialContent(initialContent), [initialContent]);
+
 	const editor = useCreateBlockNote(
 		{
-			initialContent: (Array.isArray(normalizeBlockNoteContent(initialContent)) ? normalizeBlockNoteContent(initialContent) : undefined) as any,
+			initialContent: safeInitialContent as any,
 			pasteHandler: ({ event, defaultPasteHandler }) => {
 				const clipboard = event.clipboardData;
 				if (!clipboard) {

@@ -1,5 +1,7 @@
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize"
 import { NOTE_VERSION_LIMIT } from "@/lib/note-versioning"
+import { buildSearchableTextValue } from "@/lib/searchable-text";
+import { getNoteSchemaCapabilities, type NoteSchemaCapabilities } from "@/lib/note-schema";
 import type { Prisma } from "@/generated/prisma/client"
 
 interface CreateVersionInput {
@@ -28,35 +30,80 @@ type CreateVersionResult =
       reason: "limit_reached"
     }
 
-export async function updateNoteSearchVector(
-  tx: Prisma.TransactionClient,
-  noteId: string,
-) {
-  await tx.$executeRaw`
+export async function updateNoteSearchVector(tx: Prisma.TransactionClient, noteId: string) {
+	await tx.$executeRaw`
     UPDATE "notes"
     SET "search_vector" =
-      setweight(to_tsvector('english', COALESCE("title", '')), 'A') ||
-      setweight(to_tsvector('english', COALESCE("content"::text, '')), 'B')
+      setweight(to_tsvector('simple', lower(COALESCE("title", ''))), 'A') ||
+      setweight(
+        to_tsvector(
+          'simple',
+          lower(COALESCE(to_jsonb("notes") ->> 'searchableText', to_jsonb("notes") ->> 'searchable_text', ''))
+        ),
+        'B'
+      )
     WHERE "id" = ${noteId}
-  `
+  `;
 }
 
-export async function autosaveNoteContent(
-  tx: Prisma.TransactionClient,
-  noteId: string,
-  content: unknown,
-) {
-  const normalizedContent = normalizeBlockNoteContent(content) as Prisma.InputJsonValue
+export async function markNoteEmbeddingStale(tx: Prisma.TransactionClient, noteId: string, schemaCapabilities?: NoteSchemaCapabilities) {
+	const schema = schemaCapabilities ?? (await getNoteSchemaCapabilities());
 
-  const updatedNote = await tx.note.update({
-    where: { id: noteId },
-    data: { content: normalizedContent },
-  })
+	if (schema.hasEmbeddingColumn && schema.hasVectorUpdatedAtColumn) {
+		await tx.$executeRaw`
+      UPDATE "notes"
+      SET "embedding" = NULL,
+          "vectorUpdatedAt" = NULL
+      WHERE "id" = ${noteId}
+    `;
+		return;
+	}
 
-  return {
-    updatedNote,
-    normalizedContent,
-  }
+	if (schema.hasEmbeddingColumn) {
+		await tx.$executeRaw`
+      UPDATE "notes"
+      SET "embedding" = NULL
+      WHERE "id" = ${noteId}
+    `;
+		return;
+	}
+
+	if (schema.hasVectorUpdatedAtColumn) {
+		await tx.$executeRaw`
+      UPDATE "notes"
+      SET "vectorUpdatedAt" = NULL
+      WHERE "id" = ${noteId}
+    `;
+	}
+}
+
+export async function autosaveNoteContent(tx: Prisma.TransactionClient, noteId: string, content: unknown, schemaCapabilities?: NoteSchemaCapabilities) {
+	const normalizedContent = normalizeBlockNoteContent(content) as Prisma.InputJsonValue;
+	const searchableText = buildSearchableTextValue(normalizedContent);
+	const schema = schemaCapabilities ?? (await getNoteSchemaCapabilities());
+	const updateData: Prisma.NoteUpdateInput = {
+		content: normalizedContent,
+	};
+	if (schema.hasSearchableTextColumn) {
+		updateData.searchableText = searchableText;
+	}
+
+	const updatedNote = await tx.note.update({
+		where: { id: noteId },
+		data: updateData,
+		select: {
+			id: true,
+			updatedAt: true,
+		},
+	});
+
+	await markNoteEmbeddingStale(tx, noteId, schema);
+
+	return {
+		updatedNote,
+		normalizedContent,
+		searchableText,
+	};
 }
 
 export async function createNoteVersion(

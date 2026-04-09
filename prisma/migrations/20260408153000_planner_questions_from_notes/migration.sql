@@ -1,0 +1,2 @@
+ALTER TABLE "study_plan_days"
+ADD COLUMN IF NOT EXISTS "questionCount" INTEGER NOT NULL DEFAULT 0;

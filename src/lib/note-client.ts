@@ -15,6 +15,7 @@ export interface NoteData {
 	folderId?: string | null;
 	workspace: { name: string };
 	folder: { name: string } | null;
+	folderPath?: Array<{ id: string; name: string }>;
 }
 
 export function fetchNote(noteId: string) {

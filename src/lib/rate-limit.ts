@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma"
+import { prisma } from "@/lib/prisma";
 import {
 	AI_LIMITS,
 	FLASHCARD_MODEL_LIMITS,
@@ -14,10 +14,10 @@ import {
 	type TextQuotaModelId,
 } from "@/lib/ai-limits";
 
-type KnownTextModel = keyof typeof TEXT_MODEL_LIMITS
-type KnownFlashcardModel = keyof typeof FLASHCARD_MODEL_LIMITS
+type KnownTextModel = keyof typeof TEXT_MODEL_LIMITS;
+type KnownFlashcardModel = keyof typeof FLASHCARD_MODEL_LIMITS;
 type KnownQuizModel = keyof typeof QUIZ_MODEL_LIMITS;
-type KnownVoiceModel = keyof typeof STT_MODEL_LIMITS
+type KnownVoiceModel = keyof typeof STT_MODEL_LIMITS;
 type SharedStudyCategory = "flashcard" | "quiz";
 
 type QuotaModelByCategory = {
@@ -45,9 +45,9 @@ const usageStatsRetryAtByUser = new Map<string, number>();
 const usageStatsInFlightByUser = new Map<string, Promise<UsageStats>>();
 
 interface CounterStat {
-  used: number
-  limit: number
-  remaining: number
+	used: number;
+	limit: number;
+	remaining: number;
 }
 
 export interface UsageModelStats {
@@ -81,33 +81,33 @@ export interface QuotaCheckInput<TCategory extends QuotaCategory = QuotaCategory
 }
 
 export interface QuotaCheckResult extends UsageModelStats {
-  allowed: boolean
-  error: string | null
+	allowed: boolean;
+	error: string | null;
 }
 
 interface ActiveUsageCounters {
-  requestCount: number
-  tokenCount: number
-  flashcardCount: number
-  audioSeconds: number
-  windowStartedAt: Date | null
-  windowEndsAt: Date | null
+	requestCount: number;
+	tokenCount: number;
+	flashcardCount: number;
+	audioSeconds: number;
+	windowStartedAt: Date | null;
+	windowEndsAt: Date | null;
 }
 
 function clampCounter(used: number, limit: number): CounterStat {
-  return {
-    used,
-    limit,
-    remaining: Math.max(0, limit - used),
-  }
+	return {
+		used,
+		limit,
+		remaining: Math.max(0, limit - used),
+	};
 }
 
 function getWindowEndDate(now: Date) {
-  return new Date(now.getTime() + AI_LIMITS.ROLLING_WINDOW_MS)
+	return new Date(now.getTime() + AI_LIMITS.ROLLING_WINDOW_MS);
 }
 
 function formatResetHint(resetAt: string | null) {
-  return resetAt ? ` Your 24-hour window resets at ${resetAt}.` : ""
+	return resetAt ? ` Your 24-hour window resets at ${resetAt}.` : "";
 }
 
 function buildQuotaExceededError(
@@ -212,77 +212,65 @@ function applySharedStudyRequestStats(
 }
 
 function buildUsageStats<TCategory extends QuotaCategory>(
-  category: TCategory,
-  model: QuotaModelByCategory[TCategory],
-  counters: ActiveUsageCounters,
-  increments: Omit<QuotaCheckInput<TCategory>, "category" | "model"> = {},
+	category: TCategory,
+	model: QuotaModelByCategory[TCategory],
+	counters: ActiveUsageCounters,
+	increments: Omit<QuotaCheckInput<TCategory>, "category" | "model"> = {},
 ): UsageModelStats {
-  const definition = getQuotaDefinition(category, model)
-  if (!definition) {
-    throw new Error(`Unsupported quota model: ${model}`)
-  }
+	const definition = getQuotaDefinition(category, model);
+	if (!definition) {
+		throw new Error(`Unsupported quota model: ${model}`);
+	}
 
-  const nextRequests = counters.requestCount + (increments.requests ?? 0)
-  const resetAt = counters.windowEndsAt?.toISOString() ?? null
-  const base: UsageModelStats = {
-    category,
-    model,
-    label: definition.label,
-    windowStartedAt: counters.windowStartedAt?.toISOString() ?? null,
-    resetAt,
-    requests: clampCounter(nextRequests, definition.requestsPerWindow),
-  }
+	const nextRequests = counters.requestCount + (increments.requests ?? 0);
+	const resetAt = counters.windowEndsAt?.toISOString() ?? null;
+	const base: UsageModelStats = {
+		category,
+		model,
+		label: definition.label,
+		windowStartedAt: counters.windowStartedAt?.toISOString() ?? null,
+		resetAt,
+		requests: clampCounter(nextRequests, definition.requestsPerWindow),
+	};
 
-  if ("tokensPerWindow" in definition) {
-    base.tokens = clampCounter(
-      counters.tokenCount + (increments.tokens ?? 0),
-      definition.tokensPerWindow,
-    )
-  }
+	if ("tokensPerWindow" in definition) {
+		base.tokens = clampCounter(counters.tokenCount + (increments.tokens ?? 0), definition.tokensPerWindow);
+	}
 
-  if ("questionsPerWindow" in definition) {
+	if ("questionsPerWindow" in definition) {
 		base.questions = clampCounter(counters.tokenCount + (increments.questions ?? 0), definition.questionsPerWindow);
-  }
+	}
 
-  if ("flashcardsPerWindow" in definition) {
-    base.flashcards = clampCounter(
-      counters.flashcardCount + (increments.flashcards ?? 0),
-      definition.flashcardsPerWindow,
-    )
-  }
+	if ("flashcardsPerWindow" in definition) {
+		base.flashcards = clampCounter(counters.flashcardCount + (increments.flashcards ?? 0), definition.flashcardsPerWindow);
+	}
 
-  if ("audioSecondsPerWindow" in definition) {
-    base.audioSeconds = clampCounter(
-      counters.audioSeconds + (increments.audioSeconds ?? 0),
-      definition.audioSecondsPerWindow,
-    )
-  }
+	if ("audioSecondsPerWindow" in definition) {
+		base.audioSeconds = clampCounter(counters.audioSeconds + (increments.audioSeconds ?? 0), definition.audioSecondsPerWindow);
+	}
 
-  return base
+	return base;
 }
 
-export async function checkQuotaLimit<TCategory extends QuotaCategory>(
-  userId: string,
-  input: QuotaCheckInput<TCategory>,
-): Promise<QuotaCheckResult> {
-  const now = new Date()
-  const existingWindow = await prisma.aIQuotaWindow.findUnique({
-    where: {
-      userId_category_modelKey: {
-        userId,
-        category: input.category,
-        modelKey: input.model,
-      },
-    },
-    select: {
-      requestCount: true,
-      tokenCount: true,
-      flashcardCount: true,
-      audioSeconds: true,
-      windowStartedAt: true,
-      windowEndsAt: true,
-    },
-  })
+export async function checkQuotaLimit<TCategory extends QuotaCategory>(userId: string, input: QuotaCheckInput<TCategory>): Promise<QuotaCheckResult> {
+	const now = new Date();
+	const existingWindow = await prisma.aIQuotaWindow.findUnique({
+		where: {
+			userId_category_modelKey: {
+				userId,
+				category: input.category,
+				modelKey: input.model,
+			},
+		},
+		select: {
+			requestCount: true,
+			tokenCount: true,
+			flashcardCount: true,
+			audioSeconds: true,
+			windowStartedAt: true,
+			windowEndsAt: true,
+		},
+	});
 
 	let counterpartCounters: ActiveUsageCounters | null = null;
 	if (isSharedStudyCategory(input.category)) {
@@ -307,7 +295,7 @@ export async function checkQuotaLimit<TCategory extends QuotaCategory>(
 		counterpartCounters = getActiveCounters(counterpartWindow, now);
 	}
 
-  const activeCounters = getActiveCounters(existingWindow, now)
+	const activeCounters = getActiveCounters(existingWindow, now);
 	const nextStats = buildUsageStats(input.category, input.model, activeCounters, {
 		requests: input.requests,
 		tokens: input.tokens,
@@ -319,81 +307,78 @@ export async function checkQuotaLimit<TCategory extends QuotaCategory>(
 		isSharedStudyCategory(input.category) && counterpartCounters
 			? applySharedStudyRequestStats(nextStats, input.model, activeCounters, counterpartCounters, input.requests ?? 0)
 			: nextStats;
-  const error = buildQuotaExceededError(input.category, stats.label, stats.resetAt, {
+	const error = buildQuotaExceededError(input.category, stats.label, stats.resetAt, {
 		requests: stats.requests,
 		tokens: stats.tokens,
 		flashcards: stats.flashcards,
 		questions: stats.questions,
 		audioSeconds: stats.audioSeconds,
-  });
+	});
 
-  return {
-    ...stats,
-    allowed: error === null,
-    error,
-  }
+	return {
+		...stats,
+		allowed: error === null,
+		error,
+	};
 }
 
-export async function recordQuotaUsage<TCategory extends QuotaCategory>(
-  userId: string,
-  input: QuotaCheckInput<TCategory>,
-): Promise<QuotaCheckResult> {
-  const now = new Date()
-  const tokenIncrement = input.category === "quiz" ? (input.questions ?? 0) : (input.tokens ?? 0);
+export async function recordQuotaUsage<TCategory extends QuotaCategory>(userId: string, input: QuotaCheckInput<TCategory>): Promise<QuotaCheckResult> {
+	const now = new Date();
+	const tokenIncrement = input.category === "quiz" ? (input.questions ?? 0) : (input.tokens ?? 0);
 
-  const window = await prisma.$transaction(async (tx) => {
-    const existingWindow = await tx.aIQuotaWindow.findUnique({
-      where: {
-        userId_category_modelKey: {
-          userId,
-          category: input.category,
-          modelKey: input.model,
-        },
-      },
-    })
-
-    const nextWindowEndsAt = getWindowEndDate(now)
-
-    if (!existingWindow) {
-      return tx.aIQuotaWindow.create({
-			data: {
-				userId,
-				category: input.category,
-				modelKey: input.model,
-				windowStartedAt: now,
-				windowEndsAt: nextWindowEndsAt,
-				requestCount: input.requests ?? 0,
-				tokenCount: tokenIncrement,
-				flashcardCount: input.flashcards ?? 0,
-				audioSeconds: input.audioSeconds ?? 0,
+	const window = await prisma.$transaction(async (tx) => {
+		const existingWindow = await tx.aIQuotaWindow.findUnique({
+			where: {
+				userId_category_modelKey: {
+					userId,
+					category: input.category,
+					modelKey: input.model,
+				},
 			},
 		});
-    }
 
-    if (existingWindow.windowEndsAt.getTime() <= now.getTime()) {
-      return tx.aIQuotaWindow.update({
+		const nextWindowEndsAt = getWindowEndDate(now);
+
+		if (!existingWindow) {
+			return tx.aIQuotaWindow.create({
+				data: {
+					userId,
+					category: input.category,
+					modelKey: input.model,
+					windowStartedAt: now,
+					windowEndsAt: nextWindowEndsAt,
+					requestCount: input.requests ?? 0,
+					tokenCount: tokenIncrement,
+					flashcardCount: input.flashcards ?? 0,
+					audioSeconds: input.audioSeconds ?? 0,
+				},
+			});
+		}
+
+		if (existingWindow.windowEndsAt.getTime() <= now.getTime()) {
+			return tx.aIQuotaWindow.update({
+				where: { id: existingWindow.id },
+				data: {
+					windowStartedAt: now,
+					windowEndsAt: nextWindowEndsAt,
+					requestCount: input.requests ?? 0,
+					tokenCount: tokenIncrement,
+					flashcardCount: input.flashcards ?? 0,
+					audioSeconds: input.audioSeconds ?? 0,
+				},
+			});
+		}
+
+		return tx.aIQuotaWindow.update({
 			where: { id: existingWindow.id },
 			data: {
-				windowStartedAt: now,
-				windowEndsAt: nextWindowEndsAt,
-				requestCount: input.requests ?? 0,
-				tokenCount: tokenIncrement,
-				flashcardCount: input.flashcards ?? 0,
-				audioSeconds: input.audioSeconds ?? 0,
+				requestCount: { increment: input.requests ?? 0 },
+				tokenCount: { increment: tokenIncrement },
+				flashcardCount: { increment: input.flashcards ?? 0 },
+				audioSeconds: { increment: input.audioSeconds ?? 0 },
 			},
 		});
-    }
-
-    return tx.aIQuotaWindow.update({
-		where: { id: existingWindow.id },
-		data: {
-			requestCount: { increment: input.requests ?? 0 },
-			tokenCount: { increment: tokenIncrement },
-			flashcardCount: { increment: input.flashcards ?? 0 },
-			audioSeconds: { increment: input.audioSeconds ?? 0 },
-		},
 	});
-  })
 
 	let counterpartCounters: ActiveUsageCounters | null = null;
 	if (isSharedStudyCategory(input.category)) {
@@ -418,25 +403,25 @@ export async function recordQuotaUsage<TCategory extends QuotaCategory>(
 		counterpartCounters = getActiveCounters(counterpartWindow, now);
 	}
 
-  const counters = getActiveCounters(window, now)
+	const counters = getActiveCounters(window, now);
 	const rawStats = buildUsageStats(input.category, input.model, counters);
 	const stats =
 		isSharedStudyCategory(input.category) && counterpartCounters
 			? applySharedStudyRequestStats(rawStats, input.model, counters, counterpartCounters, 0)
 			: rawStats;
-  const error = buildQuotaExceededError(input.category, stats.label, stats.resetAt, {
+	const error = buildQuotaExceededError(input.category, stats.label, stats.resetAt, {
 		requests: stats.requests,
 		tokens: stats.tokens,
 		flashcards: stats.flashcards,
 		questions: stats.questions,
 		audioSeconds: stats.audioSeconds,
-  });
+	});
 
-  return {
-    ...stats,
-    allowed: error === null,
-    error,
-  }
+	return {
+		...stats,
+		allowed: error === null,
+		error,
+	};
 }
 
 function buildUsageListForCategory<TCategory extends QuotaCategory>(
@@ -555,18 +540,18 @@ function isTransientDatabaseError(error: unknown): boolean {
 }
 
 export async function getUsageStats(userId: string): Promise<UsageStats> {
-  const now = new Date()
-  const retryAt = usageStatsRetryAtByUser.get(userId);
-  if (retryAt && retryAt > now.getTime()) {
+	const now = new Date();
+	const retryAt = usageStatsRetryAtByUser.get(userId);
+	if (retryAt && retryAt > now.getTime()) {
 		return usageStatsCacheByUser.get(userId) ?? buildEmptyUsageStats(now);
-  }
+	}
 
-  const inFlightRequest = usageStatsInFlightByUser.get(userId);
-  if (inFlightRequest) {
+	const inFlightRequest = usageStatsInFlightByUser.get(userId);
+	if (inFlightRequest) {
 		return inFlightRequest;
-  }
+	}
 
-  const request = (async () => {
+	const request = (async () => {
 		try {
 			const windows = await prisma.aIQuotaWindow.findMany({
 				where: { userId },
@@ -629,8 +614,8 @@ export async function getUsageStats(userId: string): Promise<UsageStats> {
 		} finally {
 			usageStatsInFlightByUser.delete(userId);
 		}
-  })();
+	})();
 
-  usageStatsInFlightByUser.set(userId, request);
-  return request;
+	usageStatsInFlightByUser.set(userId, request);
+	return request;
 }

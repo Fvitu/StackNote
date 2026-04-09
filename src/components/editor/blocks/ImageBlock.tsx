@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 
-"use client"
+"use client";
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type SyntheticEvent } from "react";
 import { ImageIcon, Maximize2, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
@@ -420,7 +420,9 @@ export const imageMediaBlockSpec = createReactBlockSpec(
 												onClick={() => adjustZoom(-ZOOM_STEP)}>
 												<ZoomOut className="h-4 w-4" />
 											</button>
-											<div className="min-w-14 px-2 text-center text-[11px] tabular-nums text-white/75 sm:min-w-16 sm:text-xs">{Math.round(zoom * 100)}%</div>
+											<div className="min-w-14 px-2 text-center text-[11px] tabular-nums text-white/75 sm:min-w-16 sm:text-xs">
+												{Math.round(zoom * 100)}%
+											</div>
 											<button
 												type="button"
 												className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 sm:h-8 sm:w-8"

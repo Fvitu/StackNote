@@ -478,7 +478,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 
 			updateDraftPositionByDragDelta(touch.clientY);
 		};
-	const stopDragging = () => {
+		const stopDragging = () => {
 			setIsDraggingPosition(false);
 			dragStartRef.current = null;
 		};
@@ -800,7 +800,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 									<button
 										type="button"
 										onClick={() => void handleRemoveCover()}
-											disabled={isApplying || isRemoving || disabled}
+										disabled={isApplying || isRemoving || disabled}
 										className="ml-auto inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm disabled:opacity-60"
 										style={{
 											color: "#f5b7b1",

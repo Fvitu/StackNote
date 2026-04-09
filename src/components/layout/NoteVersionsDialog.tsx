@@ -256,7 +256,7 @@ export function NoteVersionsDialog({
 					</DialogHeader>
 
 					<div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[360px_minmax(0,1fr)]">
-					<div
+						<div
 							className={`flex min-h-0 flex-col overflow-hidden border-b md:border-r md:border-b-0 ${showVersionsPanel ? "" : "hidden md:flex"}`}
 							style={{ borderColor: "var(--border-default)" }}>
 							<div

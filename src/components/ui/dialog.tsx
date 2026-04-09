@@ -53,13 +53,7 @@ function DialogContent({
 	return (
 		<DialogPortal>
 			<DialogOverlay />
-			<DialogPrimitive.Popup
-				data-slot="dialog-content"
-				className={cn(
-					placementClasses,
-					className,
-				)}
-				{...props}>
+			<DialogPrimitive.Popup data-slot="dialog-content" className={cn(placementClasses, className)} {...props}>
 				{children}
 				{showCloseButton && (
 					<DialogPrimitive.Close data-slot="dialog-close" render={<Button variant="ghost" className="absolute top-2 right-2" size="icon-sm" />}>

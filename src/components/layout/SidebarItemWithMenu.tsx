@@ -1,8 +1,8 @@
-"use client"
+"use client";
 
-import { SidebarItem } from "./SidebarItem"
-import { NoteActionsMenu } from "./NoteActionsMenu"
-import { MoreHorizontal } from "lucide-react"
+import { SidebarItem } from "./SidebarItem";
+import { NoteActionsMenu } from "./NoteActionsMenu";
+import { MoreHorizontal } from "lucide-react";
 
 interface SidebarItemWithMenuProps {
 	id: string;
@@ -35,13 +35,13 @@ interface SidebarItemWithMenuProps {
 }
 
 export function SidebarItemWithMenu(props: SidebarItemWithMenuProps) {
-  const { type, onChangeIcon, onRename, onDuplicate, onDelete, onNewNote, onNewFolder, isRenaming, ...restProps } = props;
+	const { type, onChangeIcon, onRename, onDuplicate, onDelete, onNewNote, onNewFolder, isRenaming, ...restProps } = props;
 
-  const handleMoreClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-  }
+	const handleMoreClick = (e: React.MouseEvent) => {
+		e.stopPropagation();
+	};
 
-  return (
+	return (
 		<div className="relative flex items-center">
 			<SidebarItem
 				{...restProps}
@@ -74,5 +74,5 @@ export function SidebarItemWithMenu(props: SidebarItemWithMenuProps) {
 				</div>
 			)}
 		</div>
-  );
+	);
 }

@@ -3,7 +3,6 @@
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { FileText, PanelLeftOpen, Plus } from "lucide-react";
 import { EditorSkeleton } from "@/components/layout/AppShellSkeleton";
-import { useWorkspace } from "@/contexts/WorkspaceContext";
 import type { NoteTreeItem, WorkspaceTree } from "@/types";
 
 const NoteWorkspaceClient = lazy(async () => {
@@ -15,7 +14,9 @@ const NoteWorkspaceClient = lazy(async () => {
 interface MainContentProps {
 	workspaceId: string;
 	workspaceName: string;
+	activeNoteId: string | null;
 	onNoteCreated: () => void;
+	onOpenNote: (noteId: string | null) => void;
 	onRefresh: () => void;
 	isSidebarOpen: boolean;
 	onToggleSidebar: () => void;
@@ -68,7 +69,7 @@ function ActiveNoteWorkspaceFallback({
 				transition: "none",
 				willChange: "auto",
 			}}>
-			<div className="flex flex-1 flex-col overflow-y-auto">
+			<div className="stacknote-mobile-bottom-space flex flex-1 flex-col overflow-y-auto">
 				<div className="flex h-9 shrink-0 items-center justify-between px-4" style={{ borderBottom: "1px solid var(--border-default)" }}>
 					<div className="flex items-center gap-2">
 						{!isSidebarOpen && (
@@ -104,10 +105,18 @@ function ActiveNoteWorkspaceFallback({
 	);
 }
 
-export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefresh, isSidebarOpen, onToggleSidebar, tree }: MainContentProps) {
-	const { state, setActiveNote } = useWorkspace();
+export function MainContent({
+	workspaceId,
+	workspaceName,
+	activeNoteId,
+	onNoteCreated,
+	onOpenNote,
+	onRefresh,
+	isSidebarOpen,
+	onToggleSidebar,
+	tree,
+}: MainContentProps) {
 	const [isCreatingNote, setIsCreatingNote] = useState(false);
-	const activeNoteId = state.activeNoteId;
 
 	const selectedNote = useMemo(() => {
 		if (!activeNoteId) {
@@ -136,11 +145,11 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 
 			const note = (await response.json()) as { id: string };
 			onNoteCreated();
-			setActiveNote(note.id);
+			onOpenNote(note.id);
 		} finally {
 			setIsCreatingNote(false);
 		}
-	}, [isCreatingNote, onNoteCreated, setActiveNote, workspaceId]);
+	}, [isCreatingNote, onNoteCreated, onOpenNote, workspaceId]);
 
 	if (!activeNoteId) {
 		return (
@@ -158,9 +167,7 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 					<FileText className="h-8 w-8" style={{ color: "var(--text-tertiary)" }} />
 				</div>
 				<div className="max-w-[32rem] px-6 text-center">
-					<h1
-						className="text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]"
-						style={{ color: "var(--text-primary)" }}>
+					<h1 className="text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]" style={{ color: "var(--text-primary)" }}>
 						{workspaceName}
 					</h1>
 					<p className="text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -201,6 +208,7 @@ export function MainContent({ workspaceId, workspaceName, onNoteCreated, onRefre
 				workspaceId={workspaceId}
 				workspaceName={workspaceName}
 				onNoteCreated={onNoteCreated}
+				onOpenNote={onOpenNote}
 				onRefresh={onRefresh}
 				isSidebarOpen={isSidebarOpen}
 				onToggleSidebar={onToggleSidebar}

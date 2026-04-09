@@ -8,16 +8,20 @@ export function cloneTree(tree: WorkspaceTree): WorkspaceTree {
 // Helper to add a note to the tree
 export function addNoteToTree(tree: WorkspaceTree, note: NoteTreeItem, folderId?: string | null): WorkspaceTree {
 	const newTree = cloneTree(tree);
+	const noteWithLocation: NoteTreeItem = {
+		...note,
+		folderId: folderId ?? null,
+	};
 
 	if (!folderId) {
 		// Add to root
-		newTree.rootNotes.unshift(note);
+		newTree.rootNotes.unshift(noteWithLocation);
 	} else {
 		// Add to folder
 		const addToFolder = (folders: FolderTreeItem[]): boolean => {
 			for (const folder of folders) {
 				if (folder.id === folderId) {
-					folder.notes.unshift(note);
+					folder.notes.unshift(noteWithLocation);
 					return true;
 				}
 				if (addToFolder(folder.children)) return true;
@@ -52,16 +56,20 @@ export function removeNoteFromTree(tree: WorkspaceTree, noteId: string): Workspa
 // Helper to add a folder to the tree
 export function addFolderToTree(tree: WorkspaceTree, folder: FolderTreeItem, parentId?: string | null): WorkspaceTree {
 	const newTree = cloneTree(tree);
+	const folderWithParent: FolderTreeItem = {
+		...folder,
+		parentId: parentId ?? null,
+	};
 
 	if (!parentId) {
 		// Add to root
-		newTree.folders.unshift(folder);
+		newTree.folders.unshift(folderWithParent);
 	} else {
 		// Add to parent folder
 		const addToParent = (folders: FolderTreeItem[]): boolean => {
 			for (const f of folders) {
 				if (f.id === parentId) {
-					f.children.unshift(folder);
+					f.children.unshift(folderWithParent);
 					return true;
 				}
 				if (addToParent(f.children)) return true;
@@ -174,7 +182,7 @@ export function moveNoteInTree(tree: WorkspaceTree, noteId: string, targetFolder
 
 	// Add to new location
 	if (noteToMove) {
-		newTree = addNoteToTree(newTree, noteToMove, targetFolderId);
+		newTree = addNoteToTree(newTree, { ...noteToMove, folderId: targetFolderId }, targetFolderId);
 	}
 
 	return newTree;
@@ -214,7 +222,7 @@ export function moveFolderInTree(tree: WorkspaceTree, folderId: string, targetPa
 
 	// Add to new location
 	if (folderToMove) {
-		newTree = addFolderToTree(newTree, folderToMove, targetParentId);
+		newTree = addFolderToTree(newTree, { ...folderToMove, parentId: targetParentId }, targetParentId);
 	}
 
 	return newTree;

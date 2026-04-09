@@ -1,23 +1,19 @@
-"use client"
+"use client";
 
-import { Smile, Copy, Trash2, Pencil, FilePlus, FolderPlus, MoreHorizontal, Save } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Smile, Copy, Trash2, Pencil, FilePlus, FolderPlus, MoreHorizontal, Save, History as HistoryIcon } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 interface NoteActionsMenuProps {
 	type: "note" | "folder";
-	trigger?: React.ReactNode;
+	trigger?: React.ReactElement;
 	triggerIcon?: React.ReactNode;
 	triggerClassName?: string;
+	contentClassName?: string;
 	align?: "start" | "center" | "end";
 	side?: "top" | "bottom" | "left" | "right";
 	disabled?: boolean;
 	onChangeIcon?: () => void;
+	onViewHistory?: () => void;
 	onRename?: () => void;
 	onDuplicate?: () => void;
 	onSaveVersion?: () => void;
@@ -33,10 +29,12 @@ export function NoteActionsMenu({
 	trigger,
 	triggerIcon = <MoreHorizontal className="h-3.5 w-3.5" />,
 	triggerClassName = "flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]",
+	contentClassName,
 	align = "end",
 	side = "bottom",
 	disabled = false,
 	onChangeIcon,
+	onViewHistory,
 	onRename,
 	onDuplicate,
 	onSaveVersion,
@@ -49,13 +47,17 @@ export function NoteActionsMenu({
 	return (
 		<DropdownMenu>
 			{trigger ? (
-				<DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>{trigger}</DropdownMenuTrigger>
+				<DropdownMenuTrigger render={trigger} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} />
 			) : (
-				<DropdownMenuTrigger className={triggerClassName} style={{ color: "var(--text-tertiary)" }} onClick={(e) => e.stopPropagation()}>
+				<DropdownMenuTrigger
+					className={triggerClassName}
+					style={{ color: "var(--text-tertiary)" }}
+					onClick={(e) => e.stopPropagation()}
+					onPointerDown={(e) => e.stopPropagation()}>
 					{triggerIcon}
 				</DropdownMenuTrigger>
 			)}
-			<DropdownMenuContent align={align} side={side} onClick={(e) => e.stopPropagation()}>
+			<DropdownMenuContent align={align} side={side} className={contentClassName} onClick={(e) => e.stopPropagation()}>
 				{type === "note" && onChangeIcon && (
 					<DropdownMenuItem onClick={onChangeIcon} disabled={disabled}>
 						<Smile className="h-3.5 w-3.5" />
@@ -88,6 +90,13 @@ export function NoteActionsMenu({
 					<DropdownMenuItem onClick={onDuplicate} disabled={disabled}>
 						<Copy className="h-3.5 w-3.5" />
 						Duplicate
+					</DropdownMenuItem>
+				)}
+
+				{type === "note" && onViewHistory && (
+					<DropdownMenuItem onClick={onViewHistory} disabled={disabled}>
+						<HistoryIcon className="h-3.5 w-3.5" />
+						History
 					</DropdownMenuItem>
 				)}
 

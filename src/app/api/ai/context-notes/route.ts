@@ -19,11 +19,14 @@ export async function GET(request: NextRequest) {
 			return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
 		}
 
-		return NextResponse.json({ notes }, {
-			headers: {
-				"Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+		return NextResponse.json(
+			{ notes },
+			{
+				headers: {
+					"Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+				},
 			},
-		});
+		);
 	} catch (error) {
 		console.error("Failed to load AI context notes:", error);
 		return NextResponse.json({ error: "Failed to load AI context notes" }, { status: 500 });

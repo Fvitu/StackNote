@@ -1,3 +1,3 @@
 export function buildFileAccessUrl(fileId: string): string {
-  return `/api/files/${encodeURIComponent(fileId)}`
+	return `/api/files/${encodeURIComponent(fileId)}`;
 }

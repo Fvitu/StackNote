@@ -21,10 +21,7 @@ function createQueryClient() {
 }
 
 function shouldPersistQuery(queryKey: readonly unknown[]) {
-	return (
-		(Array.isArray(queryKey) && queryKey[0] === "settings") ||
-		(Array.isArray(queryKey) && queryKey[0] === "workspace" && queryKey[1] === "tree")
-	);
+	return (Array.isArray(queryKey) && queryKey[0] === "settings") || (Array.isArray(queryKey) && queryKey[0] === "workspace" && queryKey[1] === "tree");
 }
 
 export function QueryProvider({ children }: { children: ReactNode }) {

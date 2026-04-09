@@ -90,13 +90,25 @@ export async function invalidateUserSettings(userId: string) {
 	await cacheDelete(buildSettingsKey(userId));
 }
 
-function buildWorkspaceTree(folders: Array<{ id: string; name: string; parentId: string | null }>, notes: Array<{ id: string; title: string; emoji: string | null; folderId: string | null }>): WorkspaceTree {
+function buildWorkspaceTree(
+	folders: Array<{ id: string; name: string; parentId: string | null; order: number }>,
+	notes: Array<{
+		id: string;
+		title: string;
+		emoji: string | null;
+		folderId: string | null;
+		order: number;
+		files: Array<{ id: string; type: string }>;
+	}>,
+): WorkspaceTree {
 	const folderMap = new Map<string, FolderTreeItem>();
 
 	for (const folder of folders) {
 		folderMap.set(folder.id, {
 			id: folder.id,
 			name: folder.name,
+			parentId: folder.parentId,
+			order: folder.order,
 			type: "folder",
 			children: [],
 			notes: [],
@@ -110,6 +122,8 @@ function buildWorkspaceTree(folders: Array<{ id: string; name: string; parentId:
 			title: note.title,
 			emoji: note.emoji,
 			folderId: note.folderId,
+			order: note.order,
+			files: note.files.map((file) => ({ id: file.id, mediaType: file.type as "pdf" | "audio" | "image" | "video" })),
 			type: "note",
 		};
 
@@ -179,14 +193,20 @@ export async function getWorkspaceTree(userId: string, workspaceId: string, opti
 				emoji: true,
 				folderId: true,
 				order: true,
+				files: {
+					select: {
+						id: true,
+						type: true,
+					},
+				},
 				isArchived: true,
 			},
 		}),
 	]);
 
 	const tree = buildWorkspaceTree(
-		folders.map(({ id, name, parentId }) => ({ id, name, parentId })),
-		notes.map(({ id, title, emoji, folderId }) => ({ id, title, emoji, folderId })),
+		folders.map(({ id, name, parentId, order }) => ({ id, name, parentId, order })),
+		notes.map(({ id, title, emoji, folderId, order, files }) => ({ id, title, emoji, folderId, order, files })),
 	);
 
 	await cacheSetJson(buildTreeKey(userId, workspaceId), tree, TREE_TTL_SECONDS);

@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import { Pencil, Trash2, FilePlus, FolderPlus, Copy, Smile } from "lucide-react";
 

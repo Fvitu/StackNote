@@ -1,7 +1,7 @@
-import { inlineEquationSpec } from "@/components/editor/inline/InlineEquation"
+import { inlineEquationSpec } from "@/components/editor/inline/InlineEquation";
 
 export const customInlineContentSpecs = {
-  inlineEquation: inlineEquationSpec,
-}
+	inlineEquation: inlineEquationSpec,
+};
 
-export type CustomInlineContentType = keyof typeof customInlineContentSpecs
+export type CustomInlineContentType = keyof typeof customInlineContentSpecs;

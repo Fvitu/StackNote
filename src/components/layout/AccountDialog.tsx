@@ -8,11 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { signOutAction } from "@/app/actions";
 
-type SaveState =
-	| { status: "idle" }
-	| { status: "saving" }
-	| { status: "saved"; message: string }
-	| { status: "error"; message: string };
+type SaveState = { status: "idle" } | { status: "saving" } | { status: "saved"; message: string } | { status: "error"; message: string };
 
 interface AccountDialogProps {
 	open: boolean;

@@ -378,10 +378,7 @@ export function QuizGame({ title, questions, onExit }: QuizGameProps) {
 						</div>
 					</div>
 
-					<MarkdownContent
-						content={currentQuestion.question}
-						className="mt-4 text-xl font-semibold leading-8 text-[var(--text-primary)] [&_p]:m-0"
-					/>
+					<MarkdownContent content={currentQuestion.question} className="mt-4 text-xl font-semibold leading-8 text-[var(--text-primary)] [&_p]:m-0" />
 
 					<div className="mt-6 space-y-3">
 						{currentQuestion.options.map((option) => {
@@ -414,9 +411,9 @@ export function QuizGame({ title, questions, onExit }: QuizGameProps) {
 									disabled={isAnswered}
 									className="flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition-colors disabled:cursor-default"
 									style={{ borderColor, backgroundColor }}>
-										<div className="min-w-0 flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-											<MarkdownContent content={`${option.id} ${option.text}`} className="[&_p]:m-0" />
-										</div>
+									<div className="min-w-0 flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+										<MarkdownContent content={`${option.id} ${option.text}`} className="[&_p]:m-0" />
+									</div>
 									{showFeedback && isCorrect ? <span style={{ color: "#22c55e" }}>✓</span> : null}
 									{showFeedback && isSelected && !isCorrect ? <span style={{ color: "#ef4444" }}>✗</span> : null}
 								</button>

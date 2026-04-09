@@ -4,14 +4,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { SESSION_COOKIE_NAME } from "@/lib/auth-cookie";
 import { buildCacheKey, cacheDelete, cacheGet, cacheGetJson, cacheSet, cacheSetJson, secondsUntil } from "@/lib/cache";
-import {
-	GUEST_INACTIVITY_MS,
-	GUEST_TOUCH_INTERVAL_MS,
-	isGuestExpired,
-	purgeGuestUser,
-	scheduleGuestCleanup,
-	touchGuestActivity,
-} from "@/lib/guest-session";
+import { GUEST_INACTIVITY_MS, GUEST_TOUCH_INTERVAL_MS, isGuestExpired, purgeGuestUser, scheduleGuestCleanup, touchGuestActivity } from "@/lib/guest-session";
 
 const USER_CACHE_TTL_SECONDS = 60 * 5;
 
