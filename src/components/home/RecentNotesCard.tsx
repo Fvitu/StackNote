@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildFileAccessUrl } from "@/lib/file-url";
@@ -49,6 +49,7 @@ function truncateWithDots(value: string, maxLength = 42) {
 }
 
 export function RecentNotesCard({ notes }: RecentNotesCardProps) {
+	const router = useRouter();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const dragStateRef = useRef<{
 		pointerId: number;
@@ -180,12 +181,22 @@ export function RecentNotesCard({ notes }: RecentNotesCardProps) {
 							const noteTitle = note.title || "Untitled";
 
 							return (
-								<Link
+								<div
 									key={note.id}
-									href={`/note/${note.id}`}
+									role="link"
+									tabIndex={0}
 									draggable={false}
 									onDragStart={(event) => event.preventDefault()}
-									className="h-36 w-40 shrink-0 overflow-hidden rounded-xl border border-white/5 bg-[#141414] transition-colors hover:border-white/10 hover:bg-[#1a1a1a]">
+									onClick={() => router.push(`/note/${note.id}`)}
+									onAuxClick={(e) => e.preventDefault()}
+									onContextMenu={(e) => e.preventDefault()}
+									onKeyDown={(e) => {
+										if (e.key === "Enter" || e.key === " ") {
+											e.preventDefault();
+											router.push(`/note/${note.id}`);
+										}
+									}}
+									className={`h-36 w-40 shrink-0 overflow-hidden rounded-xl border border-white/5 bg-[#141414] transition-colors hover:border-white/10 hover:bg-[#1a1a1a] ${isDragging ? "cursor-grabbing" : "cursor-pointer"}`}>
 									<div
 										className="h-16 w-full overflow-hidden"
 										style={{ backgroundColor: coverImage ? undefined : getNoteCoverColor(note.id) }}>
@@ -198,7 +209,7 @@ export function RecentNotesCard({ notes }: RecentNotesCardProps) {
 										<p className="mt-2 line-clamp-1 text-sm font-medium text-white">{truncateWithDots(noteTitle)}</p>
 										<p className="mt-2 text-xs text-zinc-500">{formatDistanceToNow(new Date(note.updatedAt), { addSuffix: true })}</p>
 									</div>
-								</Link>
+								</div>
 							);
 						})
 					)}

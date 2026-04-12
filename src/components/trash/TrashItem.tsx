@@ -3,6 +3,7 @@
 import { differenceInCalendarDays } from "date-fns";
 import { FileText, Folder, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TrashedItem } from "@/types/trash";
 
@@ -41,21 +42,20 @@ export function TrashItem({ item, disabled = false, onRestore, onDelete }: Trash
 	return (
 		<div
 			role="listitem"
-			className="group flex items-center gap-3 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3 transition-colors hover:bg-[#151515]"
+			className="group flex items-center gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-4 transition-colors hover:bg-[var(--bg-hover)]"
 			onClick={() => {
 				toast("Restore this item first to open it");
-			}}
-		>
-			<div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[var(--border-default)] bg-[#121212]">
+			}}>
+			<div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-sidebar)]">
 				{item.type === "folder" ? (
-					<Folder className="h-4 w-4 text-[var(--text-secondary)]" />
+					<Folder className="h-4 w-4 text-violet-300" />
 				) : item.coverImage ? (
 					// eslint-disable-next-line @next/next/no-img-element
 					<img src={item.coverImage} alt="" className="h-full w-full object-cover" />
 				) : item.emoji ? (
 					<span className="text-base">{item.emoji}</span>
 				) : (
-					<FileText className="h-4 w-4 text-[var(--text-secondary)]" />
+					<FileText className="h-4 w-4 text-violet-300" />
 				)}
 			</div>
 
@@ -72,7 +72,9 @@ export function TrashItem({ item, disabled = false, onRestore, onDelete }: Trash
 				<div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
 					<span>{formatDeletedLabel(item.deletedAt)}</span>
 					{item.type === "folder" ? (
-						<span className="text-[var(--text-tertiary)]">{item.childCount ?? 0} item{item.childCount === 1 ? "" : "s"} inside</span>
+						<span className="text-[var(--text-tertiary)]">
+							{item.childCount ?? 0} item{item.childCount === 1 ? "" : "s"} inside
+						</span>
 					) : null}
 				</div>
 			</div>
@@ -80,7 +82,7 @@ export function TrashItem({ item, disabled = false, onRestore, onDelete }: Trash
 			<div className="flex items-center gap-2">
 				<Tooltip>
 					<TooltipTrigger asChild>
-						<button
+						<Button
 							type="button"
 							disabled={disabled}
 							onClick={(event) => {
@@ -88,16 +90,18 @@ export function TrashItem({ item, disabled = false, onRestore, onDelete }: Trash
 								onRestore();
 							}}
 							aria-label="Restore"
-							className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[#121212] text-[var(--text-secondary)] transition-colors hover:bg-[#1a1a1a] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6aff] disabled:cursor-not-allowed disabled:opacity-50">
+							variant="outline"
+							size="icon-sm"
+							className="border-[var(--border-default)] bg-[var(--bg-sidebar)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-[#7c6aff]">
 							<RotateCcw className="h-4 w-4" />
-						</button>
+						</Button>
 					</TooltipTrigger>
-					<TooltipContent className="bg-[#0f0f0f] text-[#e8e8e8]">Restore</TooltipContent>
+					<TooltipContent>Restore</TooltipContent>
 				</Tooltip>
 
 				<Tooltip>
 					<TooltipTrigger asChild>
-						<button
+						<Button
 							type="button"
 							disabled={disabled}
 							onClick={(event) => {
@@ -105,11 +109,13 @@ export function TrashItem({ item, disabled = false, onRestore, onDelete }: Trash
 								onDelete();
 							}}
 							aria-label="Delete permanently"
-							className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-500/20 bg-rose-500/10 text-rose-300 transition-colors hover:bg-rose-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6aff] disabled:cursor-not-allowed disabled:opacity-50">
+							variant="destructive"
+							size="icon-sm"
+							className="bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 focus-visible:ring-[#7c6aff]">
 							<Trash2 className="h-4 w-4" />
-						</button>
+						</Button>
 					</TooltipTrigger>
-					<TooltipContent className="bg-[#0f0f0f] text-[#e8e8e8]">Delete permanently</TooltipContent>
+					<TooltipContent>Delete permanently</TooltipContent>
 				</Tooltip>
 			</div>
 		</div>

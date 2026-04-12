@@ -52,3 +52,9 @@ next-env.d.ts
 
 # Added by ggshield
 .cache_ggshield
+
+# workbox outputs
+/public/sw.js
+/public/sw.js.map
+/public/workbox-*.js
+/public/swe-worker-*.js

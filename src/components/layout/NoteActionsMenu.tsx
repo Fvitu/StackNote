@@ -37,7 +37,7 @@ export function NoteActionsMenu({
 	trigger,
 	triggerIcon = <MoreHorizontal className="h-3.5 w-3.5" />,
 	triggerClassName = "flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]",
-	contentClassName = "min-w-[13rem] max-w-[min(92vw,22rem)]",
+	contentClassName = "!w-fit !min-w-0 max-w-[min(92vw,22rem)]",
 	align = "end",
 	side = "bottom",
 	disabled = false,

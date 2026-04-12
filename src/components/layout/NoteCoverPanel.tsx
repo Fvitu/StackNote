@@ -686,7 +686,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 										setIsPositioning(true);
 									}}
 									disabled={disabled}
-									className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-sm"
+									className="hidden items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-sm sm:inline-flex"
 									style={{
 										borderColor: "rgba(255,255,255,0.18)",
 										backgroundColor: "rgba(8,8,8,0.58)",

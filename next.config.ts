@@ -7,40 +7,72 @@ const require = createRequire(import.meta.url);
 const withBundleAnalyzer = bundleAnalyzer({
 	enabled: process.env.ANALYZE === "true",
 });
+const disablePWA = process.env.NODE_ENV === "development" || process.env.VERCEL === "1";
+
 const withStackNotePWA = withPWA({
 	dest: "public",
-	disable: process.env.NODE_ENV === "development",
+	disable: disablePWA,
 	cacheOnFrontEndNav: true,
 	aggressiveFrontEndNavCaching: true,
-	reloadOnOnline: true,
+	reloadOnOnline: false,
 	workboxOptions: {
 		disableDevLogs: true,
+		navigateFallback: "/offline",
+		navigateFallbackDenylist: [/^\/api\//],
 		runtimeCaching: [
 			{
-				urlPattern: ({ request, url }) => request.method === "GET" && url.pathname.startsWith("/api/notes/"),
-				handler: "StaleWhileRevalidate",
+				urlPattern: ({ request, url }) => request.method === "GET" && url.pathname.startsWith("/api/auth/"),
+				handler: "NetworkOnly",
 				options: {
-					cacheName: "notes-cache",
+					cacheName: "auth-network-only",
+				},
+			},
+			{
+				urlPattern: ({ request, url }) =>
+					request.method === "GET" &&
+					typeof self !== "undefined" &&
+					url.origin === self.location.origin &&
+					!url.pathname.startsWith("/api/") &&
+					(request.destination === "document" || request.destination === "script" || request.destination === "style"),
+				handler: "CacheFirst",
+				options: {
+					cacheName: "app-shell-cache",
 					expiration: {
-						maxEntries: 200,
-						maxAgeSeconds: 7 * 24 * 60 * 60,
+						maxEntries: 300,
+						maxAgeSeconds: 30 * 24 * 60 * 60,
 					},
 				},
 			},
 			{
-				urlPattern: ({ request, url }) => request.method === "GET" && /^\/api\/workspace\/.+\/tree$/.test(url.pathname),
-				handler: "StaleWhileRevalidate",
+				urlPattern: ({ request, url }) =>
+					request.method === "GET" && (url.pathname === "/api/notes" || url.pathname.startsWith("/api/notes/") || url.pathname === "/api/blocks"),
+				handler: "NetworkFirst",
 				options: {
-					cacheName: "workspace-cache",
+					cacheName: "notes-blocks-api-cache",
+					networkTimeoutSeconds: 3,
+					expiration: {
+						maxEntries: 200,
+						maxAgeSeconds: 24 * 60 * 60,
+					},
 				},
 			},
 			{
-				urlPattern: ({ request, url }) => request.method === "GET" && url.hostname.endsWith(".supabase.co") && url.pathname.includes("/storage/v1/object/"),
+				urlPattern: ({ request, url }) =>
+					request.method === "GET" &&
+					(request.destination === "font" || request.destination === "image" || url.pathname.startsWith("/_next/static/")),
+				handler: "StaleWhileRevalidate",
+				options: {
+					cacheName: "static-assets-cache",
+				},
+			},
+			{
+				urlPattern: ({ request, url }) =>
+					request.method === "GET" && (url.hostname.includes("r2.cloudflarestorage.com") || url.hostname.endsWith(".r2.dev")),
 				handler: "CacheFirst",
 				options: {
-					cacheName: "media-cache",
+					cacheName: "r2-files-cache",
 					expiration: {
-						maxEntries: 100,
+						maxEntries: 60,
 						maxAgeSeconds: 7 * 24 * 60 * 60,
 					},
 				},

@@ -12,7 +12,7 @@ interface LazyNoteEditorProps {
 	noteId: string;
 	initialContent: NoteData["content"];
 	onContentChange: (noteId: string, content: unknown) => void;
-	onSave: (noteId: string, content: unknown) => Promise<void>;
+	onSave: (noteId: string, content: unknown, changedBlockIds: string[]) => Promise<void>;
 }
 
 export const LazyNoteEditor = forwardRef<NoteEditorRef, LazyNoteEditorProps>(function LazyNoteEditor(props, ref) {

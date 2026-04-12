@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -12,6 +12,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TrashEmptyState } from "@/components/trash/TrashEmptyState";
 import { TrashItem } from "@/components/trash/TrashItem";
@@ -58,55 +59,67 @@ export function TrashPanel({ open, workspaceId, onClose }: TrashPanelProps) {
 					</Tooltip>
 				</div>
 
+				<div className="px-4 pt-6 pb-4">
+					<div className="flex items-center gap-2">
+						<Trash2 className="h-5 w-5" style={{ color: "var(--sn-accent)" }} />
+						<p className="text-base font-medium" style={{ color: "var(--text-primary)" }}>
+							Deleted items
+						</p>
+					</div>
+				</div>
+
 				<div className="relative flex-1 min-h-0">
 					<div className="h-full overflow-y-auto px-4 py-4 pb-24">
-					{isInitialLoading ? (
-						<div className="space-y-3">
-							{Array.from({ length: 5 }).map((_, index) => (
-								<TrashItemSkeleton key={index} />
-							))}
-						</div>
-					) : items.length === 0 ? (
-						<TrashEmptyState />
-					) : (
-						<div role="list" className="space-y-3">
-							{items.map((item) => (
-								<TrashItem
-									key={item.id}
-									item={item}
-									disabled={isItemPending(item.id)}
-									onRestore={() => {
-										void restoreItem(item);
-									}}
-									onDelete={() => {
-										setDeleteConfirmItem(item);
-									}}
-								/>
-							))}
+						{isInitialLoading ? (
+							<div className="space-y-3">
+								{Array.from({ length: 5 }).map((_, index) => (
+									<TrashItemSkeleton key={index} />
+								))}
+							</div>
+						) : items.length === 0 ? (
+							<TrashEmptyState />
+						) : (
+							<div role="list" className="space-y-3">
+								{items.map((item) => (
+									<TrashItem
+										key={item.id}
+										item={item}
+										disabled={isItemPending(item.id)}
+										onRestore={() => {
+											void restoreItem(item);
+										}}
+										onDelete={() => {
+											setDeleteConfirmItem(item);
+										}}
+									/>
+								))}
 
-							{isFetchingNextPage ? (
-								<div className="space-y-3 pt-1">
-									{Array.from({ length: 3 }).map((_, index) => (
-										<TrashItemSkeleton key={`next-${index}`} />
-									))}
-								</div>
-							) : null}
+								{isFetchingNextPage ? (
+									<div className="space-y-3 pt-1">
+										{Array.from({ length: 3 }).map((_, index) => (
+											<TrashItemSkeleton key={`next-${index}`} />
+										))}
+									</div>
+								) : null}
 
-							<div ref={sentinelRef} aria-hidden="true" className="h-1" />
+								<div ref={sentinelRef} aria-hidden="true" className="h-1" />
 
-							{!hasNextPage ? <p className="py-2 text-center text-xs text-[var(--text-tertiary)]">No more items</p> : null}
-						</div>
-					)}
+								{!hasNextPage ? <p className="py-2 text-center text-xs text-[var(--text-tertiary)]">No more items</p> : null}
+							</div>
+						)}
 					</div>
 
-					<div className="pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-4 pt-8" style={{ background: "linear-gradient(to top, var(--bg-sidebar) 40%, transparent 100%)" }}>
-						<button
+					<div
+						className="pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-4 pt-8"
+						style={{ background: "linear-gradient(to top, var(--bg-sidebar) 40%, transparent 100%)" }}>
+						<Button
 							type="button"
+							variant="destructive"
 							onClick={() => setConfirmOpen(true)}
 							disabled={items.length === 0 || isEmptying}
-							className="pointer-events-auto inline-flex h-10 w-full items-center justify-center rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 text-sm font-medium text-rose-300 transition-colors hover:bg-rose-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6aff] disabled:cursor-not-allowed disabled:opacity-50">
+							className="pointer-events-auto h-10 w-full rounded-xl bg-rose-500/10 px-3 text-sm font-medium text-rose-300 hover:bg-rose-500/20 focus-visible:ring-[#7c6aff]">
 							Empty Trash
-						</button>
+						</Button>
 					</div>
 				</div>
 			</div>
@@ -117,8 +130,7 @@ export function TrashPanel({ open, workspaceId, onClose }: TrashPanelProps) {
 					if (!nextOpen) {
 						setDeleteConfirmItem(null);
 					}
-				}}
-			>
+				}}>
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>{deleteConfirmTitle}</AlertDialogTitle>
@@ -135,8 +147,7 @@ export function TrashPanel({ open, workspaceId, onClose }: TrashPanelProps) {
 								const item = deleteConfirmItem;
 								setDeleteConfirmItem(null);
 								void permanentlyDeleteItem(item);
-							}}
-						>
+							}}>
 							Delete permanently
 						</AlertDialogAction>
 					</AlertDialogFooter>
@@ -147,15 +158,16 @@ export function TrashPanel({ open, workspaceId, onClose }: TrashPanelProps) {
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>Empty trash?</AlertDialogTitle>
-						<AlertDialogDescription>This permanently deletes every item currently in your trash. This action cannot be undone.</AlertDialogDescription>
+						<AlertDialogDescription>
+							This permanently deletes every item currently in your trash. This action cannot be undone.
+						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={() => {
 								void emptyTrash();
-							}}
-						>
+							}}>
 							Empty Trash
 						</AlertDialogAction>
 					</AlertDialogFooter>

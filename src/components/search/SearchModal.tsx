@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Search, X, FileText } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +25,102 @@ function useDebounced<T>(value: T, delay: number) {
 	return debounced;
 }
 
+function normalizeSearchText(value: string) {
+	return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+}
+
+function tokenizeSearchQuery(query: string) {
+	return normalizeSearchText(query).match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function buildNormalizedTextMap(text: string) {
+	let normalizedText = "";
+	const originalIndexByNormalizedIndex: number[] = [];
+
+	for (const [index, character] of Array.from(text).entries()) {
+		const normalizedCharacter = character.normalize("NFD").replace(/\p{M}/gu, "");
+		for (const normalizedPart of Array.from(normalizedCharacter)) {
+			normalizedText += normalizedPart.toLowerCase();
+			originalIndexByNormalizedIndex.push(index);
+		}
+	}
+
+	return { normalizedText, originalIndexByNormalizedIndex };
+}
+
+function getHighlightedNodes(text: string, queryTokens: string[]): ReactNode {
+	if (!text || queryTokens.length === 0) {
+		return text;
+	}
+
+	const { normalizedText, originalIndexByNormalizedIndex } = buildNormalizedTextMap(text);
+	if (!normalizedText) {
+		return text;
+	}
+
+	const ranges: Array<{ start: number; end: number }> = [];
+
+	for (const token of queryTokens) {
+		let searchIndex = 0;
+		while (searchIndex < normalizedText.length) {
+			const matchIndex = normalizedText.indexOf(token, searchIndex);
+			if (matchIndex === -1) {
+				break;
+			}
+
+			ranges.push({
+				start: matchIndex,
+				end: matchIndex + token.length,
+			});
+			searchIndex = matchIndex + token.length;
+		}
+	}
+
+	if (ranges.length === 0) {
+		return text;
+	}
+
+	ranges.sort((left, right) => left.start - right.start || left.end - right.end);
+	const mergedRanges: Array<{ start: number; end: number }> = [];
+
+	for (const range of ranges) {
+		const previousRange = mergedRanges[mergedRanges.length - 1];
+		if (!previousRange || range.start > previousRange.end) {
+			mergedRanges.push({ ...range });
+			continue;
+		}
+
+		previousRange.end = Math.max(previousRange.end, range.end);
+	}
+
+	const nodes: ReactNode[] = [];
+	let cursor = 0;
+
+	for (const [index, range] of mergedRanges.entries()) {
+		const startOriginalIndex = originalIndexByNormalizedIndex[range.start];
+		const endOriginalIndex = originalIndexByNormalizedIndex[Math.min(range.end - 1, originalIndexByNormalizedIndex.length - 1)] + 1;
+		const safeStartIndex = Math.max(cursor, startOriginalIndex ?? cursor);
+		const safeEndIndex = Math.max(safeStartIndex, endOriginalIndex ?? safeStartIndex);
+
+		if (safeStartIndex > cursor) {
+			nodes.push(<Fragment key={`text-${index}`}>{text.slice(cursor, safeStartIndex)}</Fragment>);
+		}
+
+		nodes.push(
+			<mark key={`match-${index}`} className="rounded-[0.18em] bg-[#a855f7]/25 px-[0.08em] py-[0.02em] text-inherit" style={{ color: "inherit" }}>
+				{text.slice(safeStartIndex, safeEndIndex)}
+			</mark>,
+		);
+		cursor = safeEndIndex;
+	}
+
+	if (cursor < text.length) {
+		nodes.push(<Fragment key="text-tail">{text.slice(cursor)}</Fragment>);
+	}
+
+	return nodes;
+}
+
 export function SearchModal({ workspaceId, open, onClose, onSelectNote }: SearchModalProps) {
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [query, setQuery] = useState("");
@@ -34,6 +130,7 @@ export function SearchModal({ workspaceId, open, onClose, onSelectNote }: Search
 	const [requestError, setRequestError] = useState<string | null>(null);
 
 	const debouncedQuery = useDebounced(query, 300);
+	const highlightedQueryTokens = useMemo(() => tokenizeSearchQuery(debouncedQuery), [debouncedQuery]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -215,12 +312,12 @@ export function SearchModal({ workspaceId, open, onClose, onSelectNote }: Search
 											<div className="min-w-0 flex-1">
 												<div className="flex items-center gap-2">
 													<p className="truncate text-sm" style={{ color: "var(--text-primary)" }}>
-														{result.title || "Untitled"}
+														{getHighlightedNodes(result.title || "Untitled", highlightedQueryTokens)}
 													</p>
 												</div>
 												{result.snippet ? (
 													<p className="mt-1 line-clamp-2 text-xs" style={{ color: "var(--text-secondary)" }}>
-														{result.snippet}
+														{getHighlightedNodes(result.snippet, highlightedQueryTokens)}
 													</p>
 												) : null}
 											</div>

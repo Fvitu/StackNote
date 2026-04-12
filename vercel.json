@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/purge-guests",
+      "schedule": "0 2 * * *"
+    },
+    {
       "path": "/api/cron/purge-trash",
       "schedule": "0 3 * * *"
     }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { SESSION_COOKIE_NAME } from "@/lib/auth-cookie";
 import { createGuestUserWithWorkspace, scheduleGuestCleanup } from "@/lib/guest-session";
@@ -11,6 +12,11 @@ function buildSessionToken() {
 
 export async function POST() {
 	try {
+		const session = await auth();
+		if (session?.user?.id) {
+			return NextResponse.json({ error: "Already authenticated" }, { status: 409 });
+		}
+
 		const guestUser = await createGuestUserWithWorkspace();
 		const sessionToken = buildSessionToken();
 		const expires = new Date(Date.now() + GUEST_SESSION_MAX_AGE_SECONDS * 1000);

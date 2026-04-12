@@ -216,7 +216,8 @@ export async function POST(req: NextRequest) {
 	}
 
 	const requestedContextNoteIds = normalizeContextNoteIds(contextNoteIds);
-	const effectiveContextNoteIds = activeSession?.contextNoteIds.length ? activeSession.contextNoteIds : requestedContextNoteIds;
+	const activeContextNoteIds = Array.isArray(activeSession?.contextNoteIds) ? activeSession.contextNoteIds : [];
+	const effectiveContextNoteIds = activeContextNoteIds.length > 0 ? activeContextNoteIds : requestedContextNoteIds;
 	let contextNotes: ContextNote[] = [];
 	let noteContextText: string | undefined;
 	let contextLabel: string | undefined;
@@ -491,7 +492,7 @@ export async function POST(req: NextRequest) {
 						},
 						data: {
 							lastMessageAt: new Date(),
-							...(activeSession.contextNoteIds.length === 0 && effectiveContextNoteIds.length > 0 ? { contextNoteIds: effectiveContextNoteIds } : {}),
+							...(activeContextNoteIds.length === 0 && effectiveContextNoteIds.length > 0 ? { contextNoteIds: effectiveContextNoteIds } : {}),
 							...(existingMessageCount === 0 ? { title: buildChatSessionTitle(latestUserMessage) } : {}),
 						},
 					});

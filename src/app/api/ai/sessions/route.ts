@@ -11,6 +11,8 @@ interface CreateSessionBody {
 	contextNoteIds?: unknown;
 }
 
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
 function jsonError(message: string, status: number) {
 	return NextResponse.json({ error: message }, { status });
 }
@@ -99,19 +101,26 @@ export async function GET(req: NextRequest) {
 		orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
 	});
 
-	return NextResponse.json({
-		sessions: sessions.map((item) => ({
-			id: item.id,
-			title: item.title,
-			workspaceId: item.workspaceId,
-			noteId: item.noteId,
-			contextNoteIds: item.contextNoteIds,
-			lastMessageAt: item.lastMessageAt,
-			createdAt: item.createdAt,
-			updatedAt: item.updatedAt,
-			messageCount: item._count.messages,
-		})),
-	});
+	return NextResponse.json(
+		{
+			sessions: sessions.map((item) => ({
+				id: item.id,
+				title: item.title,
+				workspaceId: item.workspaceId,
+				noteId: item.noteId,
+				contextNoteIds: item.contextNoteIds,
+				lastMessageAt: item.lastMessageAt,
+				createdAt: item.createdAt,
+				updatedAt: item.updatedAt,
+				messageCount: item._count.messages,
+			})),
+		},
+		{
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }
 
 export async function POST(req: NextRequest) {

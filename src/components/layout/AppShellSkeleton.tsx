@@ -60,6 +60,27 @@ export function EmojiPickerSkeleton() {
 	);
 }
 
+export function LoadingContentSkeleton({ workspaceName }: { workspaceName?: string | null }) {
+	const resolvedWorkspaceName = workspaceName ?? "Workspace";
+
+	return (
+		<div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 fade-in" style={{ backgroundColor: "var(--bg-app)" }}>
+			<div className="flex h-16 w-16 items-center justify-center rounded-2xl smooth-bg" style={{ backgroundColor: "var(--bg-surface)" }}>
+				<StackNoteLogo className="h-8 w-8" alt="StackNote" />
+			</div>
+			<div className="max-w-[32rem] text-center">
+				<h1 className="text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]" style={{ color: "var(--text-primary)" }}>
+					{resolvedWorkspaceName}
+				</h1>
+				<div className="mt-2 flex items-center justify-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+					<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+					<span>Loading content...</span>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 export function EditorSkeleton() {
 	return (
 		<div className="flex flex-1 overflow-hidden" style={{ backgroundColor: "var(--bg-app)" }}>
@@ -213,22 +234,7 @@ export function AppShellSkeleton({
 					</div>
 				</div>
 
-				<div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 fade-in">
-					<div className="flex h-16 w-16 items-center justify-center rounded-2xl smooth-bg" style={{ backgroundColor: "var(--bg-surface)" }}>
-						<StackNoteLogo className="h-8 w-8" alt="StackNote" />
-					</div>
-					<div className="max-w-[32rem] text-center">
-						<h1
-							className="text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]"
-							style={{ color: "var(--text-primary)" }}>
-							{resolvedWorkspaceName}
-						</h1>
-						<div className="mt-2 flex items-center justify-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
-							<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-							<span>Loading content...</span>
-						</div>
-					</div>
-				</div>
+				<LoadingContentSkeleton workspaceName={resolvedWorkspaceName} />
 			</div>
 		</div>
 	);

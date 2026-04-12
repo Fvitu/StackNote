@@ -310,7 +310,7 @@ export default async function AppPage({ searchParams }: { searchParams: Promise<
 
 	return (
 		<div className="flex h-full min-h-0 min-w-0 w-full flex-1 overflow-hidden bg-[#0a0a0a]">
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-4 pt-4 sm:px-6 sm:pt-6">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-4 sm:px-6">
 				<HomeTopBar />
 				<div className="mx-auto flex min-w-0 w-full max-w-[1440px] flex-col gap-6 pb-16 pt-4 sm:pb-10 sm:pt-6">
 					<HomeHero displayName={session.user.name ?? "Student"} statusLine={statusLine} />
@@ -354,7 +354,7 @@ export default async function AppPage({ searchParams }: { searchParams: Promise<
 						}
 					/>
 
-					<footer className="mt-12 border-t border-white/5 pt-4 text-center text-xs text-zinc-500">Created ❤️ with by Fvitu © {currentYear}</footer>
+					<footer className="mt-12 border-t border-white/5 pt-4 text-center text-xs text-zinc-500">Created with ❤️ by Fvitu © {currentYear}</footer>
 				</div>
 			</div>
 		</div>

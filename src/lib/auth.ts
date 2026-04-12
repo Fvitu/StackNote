@@ -2,9 +2,6 @@ import { createHash } from "node:crypto";
 import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { Adapter } from "@auth/core/adapters";
-import Resend from "next-auth/providers/resend";
-import Google from "next-auth/providers/google";
-import { Resend as ResendClient } from "resend";
 import { prisma } from "@/lib/prisma";
 import { buildMagicLinkEmail } from "@/lib/email/magic-link";
 import { GUEST_INACTIVITY_MS } from "@/lib/guest-session";
@@ -71,11 +68,16 @@ function resolveAuthSecret(): string {
 const authBaseUrl = resolveAuthBaseUrl();
 const authSecret = resolveAuthSecret();
 const resendApiKey = process.env.RESEND_API_KEY?.trim();
-const resendClient = resendApiKey ? new ResendClient(resendApiKey) : null;
 const resendFrom = readEnvValue(process.env.RESEND_FROM) ?? "StackNote <noreply@stacknote.fvitu.qzz.io>";
+const googleClientId = readEnvValue(process.env.GOOGLE_CLIENT_ID);
+const googleClientSecret = readEnvValue(process.env.GOOGLE_CLIENT_SECRET);
 
 if (!resendApiKey) {
 	console.warn("[auth] RESEND_API_KEY is not set. Email magic-link sign-in is disabled.");
+}
+
+if (!googleClientId || !googleClientSecret) {
+	console.warn("[auth] GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET are not set. Google sign-in is disabled.");
 }
 
 function createCachedAdapter(): Adapter {
@@ -93,45 +95,60 @@ function createCachedAdapter(): Adapter {
 	};
 }
 
+
+async function buildProviders() {
+	const providers = [];
+
+	if (resendApiKey) {
+		const { default: Resend } = await import("next-auth/providers/resend");
+		const { Resend: ResendClient } = await import("resend");
+		const resendClient = new ResendClient(resendApiKey);
+
+		providers.push(
+			Resend({
+				apiKey: resendApiKey,
+				from: resendFrom,
+				async sendVerificationRequest({ identifier: email, url, provider }) {
+					const resolvedUrl = parseUrl(url, authBaseUrl) ?? new URL(authBaseUrl);
+					const host = resolvedUrl.host;
+					const { html, text } = buildMagicLinkEmail({ url: resolvedUrl.toString(), host, email });
+
+					const { error } = await resendClient.emails.send({
+						from: provider.from as string,
+						to: [email],
+						subject: "Sign in to StackNote",
+						html,
+						text,
+					});
+
+					if (error) {
+						throw new Error(`Failed to send verification email: ${error.message}`);
+					}
+				},
+			}),
+		);
+	}
+
+	if (googleClientId && googleClientSecret) {
+		const { default: Google } = await import("next-auth/providers/google");
+		providers.push(
+			Google({
+				clientId: googleClientId,
+				clientSecret: googleClientSecret,
+			}),
+		);
+	}
+
+	return providers;
+}
+
+const providers = await buildProviders();
+
 const _nextAuth = NextAuth({
 	trustHost: true,
 	secret: authSecret,
 	adapter: createCachedAdapter(),
-	providers: [
-		...(resendApiKey
-			? [
-					Resend({
-						apiKey: resendApiKey,
-						from: resendFrom,
-						async sendVerificationRequest({ identifier: email, url, provider }) {
-							if (!resendClient) {
-								throw new Error("Email sign-in is not configured. Set RESEND_API_KEY.");
-							}
-
-							const resolvedUrl = parseUrl(url, authBaseUrl) ?? new URL(authBaseUrl);
-							const host = resolvedUrl.host;
-							const { html, text } = buildMagicLinkEmail({ url: resolvedUrl.toString(), host, email });
-
-							const { error } = await resendClient.emails.send({
-								from: provider.from as string,
-								to: [email],
-								subject: "Sign in to StackNote",
-								html,
-								text,
-							});
-
-							if (error) {
-								throw new Error(`Failed to send verification email: ${error.message}`);
-							}
-						},
-					}),
-				]
-			: []),
-		Google({
-			clientId: process.env.GOOGLE_CLIENT_ID,
-			clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-		}),
-	],
+	providers,
 	pages: {
 		signIn: "/login",
 		verifyRequest: "/login/verify",

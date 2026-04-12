@@ -217,7 +217,7 @@ export function AccountDialog({
 									</p>
 									<div className="mt-4 border-t pt-4" style={{ borderColor: "var(--border-default)" }}>
 										<Button
-											variant="outline"
+											variant="destructive"
 											onClick={async () => {
 												setIsSigningOut(true);
 												try {
@@ -228,8 +228,7 @@ export function AccountDialog({
 												}
 											}}
 											disabled={isSigningOut}
-											className="h-9 w-full justify-between px-3 text-sm"
-											style={{ borderColor: "rgba(239, 68, 68, 0.22)", color: "#fca5a5", backgroundColor: "rgba(239, 68, 68, 0.06)" }}>
+											className="h-9 w-full justify-between px-3 text-sm">
 											<span>{isSigningOut ? "Signing out..." : "Sign out"}</span>
 											<LogOut className="h-4 w-4" />
 										</Button>

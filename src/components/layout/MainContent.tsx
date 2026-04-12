@@ -1,8 +1,9 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useMemo, useState } from "react";
-import { FileText, PanelLeftOpen, Plus } from "lucide-react";
-import { EditorSkeleton } from "@/components/layout/AppShellSkeleton";
+import { lazy, Suspense, useMemo, useState } from "react";
+import { PanelLeftOpen } from "lucide-react";
+import { EditorSkeleton, LoadingContentSkeleton } from "@/components/layout/AppShellSkeleton";
+import { ScrollRevealBar } from "@/components/layout/ScrollRevealBar";
 import type { NoteTreeItem, WorkspaceTree } from "@/types";
 
 const NoteWorkspaceClient = lazy(async () => {
@@ -70,14 +71,16 @@ function ActiveNoteWorkspaceFallback({
 				willChange: "auto",
 			}}>
 			<div className="stacknote-mobile-bottom-space flex flex-1 flex-col overflow-y-auto">
-				<div className="flex h-9 shrink-0 items-center justify-between px-4" style={{ borderBottom: "1px solid var(--border-default)" }}>
+				<ScrollRevealBar
+					className="flex h-9 shrink-0 items-center justify-between bg-[var(--bg-app)] px-4"
+					style={{ borderBottom: "1px solid var(--border-default)" }}>
 					<div className="flex items-center gap-2">
 						{!isSidebarOpen && (
 							<button
 								type="button"
 								onClick={onToggleSidebar}
 								className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
-								title="Open sidebar (Ctrl+\)">
+								title="Open sidebar (Ctrl+\\)">
 								<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
 							</button>
 						)}
@@ -97,7 +100,7 @@ function ActiveNoteWorkspaceFallback({
 							</span>
 						</div>
 					</div>
-				</div>
+				</ScrollRevealBar>
 
 				<EditorSkeleton />
 			</div>
@@ -126,71 +129,8 @@ export function MainContent({
 		return findNoteInTree(tree, activeNoteId);
 	}, [activeNoteId, tree]);
 
-	const handleCreateNote = useCallback(async () => {
-		if (isCreatingNote) {
-			return;
-		}
-
-		setIsCreatingNote(true);
-		try {
-			const response = await fetch("/api/notes", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ workspaceId }),
-			});
-
-			if (!response.ok) {
-				throw new Error("Failed to create note");
-			}
-
-			const note = (await response.json()) as { id: string };
-			onNoteCreated();
-			onOpenNote(note.id);
-		} finally {
-			setIsCreatingNote(false);
-		}
-	}, [isCreatingNote, onNoteCreated, onOpenNote, workspaceId]);
-
 	if (!activeNoteId) {
-		return (
-			<div className="flex flex-1 flex-col items-center justify-center gap-4 fade-in" style={{ backgroundColor: "var(--bg-app)" }}>
-				{!isSidebarOpen && (
-					<button
-						type="button"
-						onClick={onToggleSidebar}
-						className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
-						title="Open sidebar (Ctrl+\)">
-						<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-					</button>
-				)}
-				<div className="flex h-16 w-16 items-center justify-center rounded-2xl smooth-bg" style={{ backgroundColor: "var(--bg-surface)" }}>
-					<FileText className="h-8 w-8" style={{ color: "var(--text-tertiary)" }} />
-				</div>
-				<div className="max-w-[32rem] px-6 text-center">
-					<h1 className="text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]" style={{ color: "var(--text-primary)" }}>
-						{workspaceName}
-					</h1>
-					<p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-						Select a note or create a new one
-					</p>
-				</div>
-				<button
-					type="button"
-					onClick={() => void handleCreateNote()}
-					disabled={isCreatingNote}
-					className="hover-scale mt-2 flex items-center gap-2 rounded-[var(--sn-radius-md)] px-4 py-2 text-sm transition-all duration-150 disabled:opacity-70"
-					style={{ backgroundColor: "var(--accent-muted)", color: "var(--sn-accent)" }}
-					onMouseEnter={(event) => {
-						(event.currentTarget as HTMLElement).style.backgroundColor = "rgba(124, 106, 255, 0.25)";
-					}}
-					onMouseLeave={(event) => {
-						(event.currentTarget as HTMLElement).style.backgroundColor = "var(--accent-muted)";
-					}}>
-					<Plus className="h-4 w-4" />
-					{isCreatingNote ? "Creating note..." : "Create your first note"}
-				</button>
-			</div>
-		);
+		return <LoadingContentSkeleton workspaceName={workspaceName} />;
 	}
 
 	return (

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
 import { parseNoteCoverMeta } from "@/lib/note-cover";
 
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
 async function resolveCoverImageUrl(coverImage: string | null | undefined, coverImageMeta: unknown): Promise<string | null | undefined> {
 	const parsedMeta = parseNoteCoverMeta(coverImageMeta);
 	if (!parsedMeta || parsedMeta.source !== "upload") {
@@ -95,12 +97,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 	const resolvedCoverImage = await resolveCoverImageUrl(coverImage, coverImageMeta);
 
-	return NextResponse.json({
-		...version,
-		content: normalizedContent,
-		title,
-		emoji,
-		coverImage: resolvedCoverImage,
-		coverImageMeta,
-	});
+	return NextResponse.json(
+		{
+			...version,
+			content: normalizedContent,
+			title,
+			emoji,
+			coverImage: resolvedCoverImage,
+			coverImageMeta,
+		},
+		{
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }

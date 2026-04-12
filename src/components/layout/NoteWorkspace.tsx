@@ -4,22 +4,26 @@ import dynamic from "next/dynamic";
 import { lazy, Suspense, useState, useEffect, useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { FileText, Plus, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History, Sparkles, Brain } from "lucide-react";
+import { FileText, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History, Sparkles, Brain } from "lucide-react";
 import { toast } from "sonner";
 import { AIPanelSkeleton } from "@/components/ai/AIPanelSkeleton";
 import { LazyNoteEditor } from "@/components/editor/LazyNoteEditor";
 import type { NoteEditorRef } from "@/components/editor/NoteEditor";
 import { NoteTitle } from "@/components/editor/NoteTitle";
 import { SaveIndicator } from "@/components/editor/SaveIndicator";
-import { EditorSkeleton, EmojiPickerSkeleton } from "@/components/layout/AppShellSkeleton";
+import { EditorSkeleton, EmojiPickerSkeleton, LoadingContentSkeleton } from "@/components/layout/AppShellSkeleton";
 import { Breadcrumb, type BreadcrumbSegment } from "@/components/layout/Breadcrumb";
 import { NoteCoverPanel } from "@/components/layout/NoteCoverPanel";
+import { ScrollRevealBar } from "@/components/layout/ScrollRevealBar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { NoteActionsMenu } from "@/components/layout/NoteActionsMenu";
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
 import { resolveNoteCoverMeta } from "@/lib/note-cover";
 import { useNoteCache, type CachedNote, type CachedNoteMetadata } from "@/hooks/useNoteCache";
+import { useDebouncedSave } from "@/hooks/useDebouncedSave";
+import { localNotes, syncQueue } from "@/lib/db/local";
+import { noteDataToLocalRecord, fetchNoteWithLocalFallback } from "@/lib/db/noteSync";
 import { readPendingAiPrompt } from "@/lib/pending-ai-prompt";
 import {
 	NOTE_VERSION_IDLE_THRESHOLD_MS,
@@ -243,6 +247,33 @@ function buildPlaceholderNote(note: NoteTreeItem, workspaceName: string): NoteDa
 	};
 }
 
+function extractChangedBlocksFromContent(content: unknown, changedBlockIds: string[]) {
+	const wanted = new Set(changedBlockIds);
+	const changed: Array<{ id: string; block: unknown }> = [];
+
+	const visit = (value: unknown) => {
+		if (!Array.isArray(value)) {
+			return;
+		}
+
+		for (const item of value) {
+			if (!item || typeof item !== "object") {
+				continue;
+			}
+
+			const record = item as { id?: unknown; children?: unknown };
+			if (typeof record.id === "string" && wanted.has(record.id)) {
+				changed.push({ id: record.id, block: item });
+			}
+
+			visit(record.children);
+		}
+	};
+
+	visit(normalizeBlockNoteContent(content));
+	return changed;
+}
+
 function buildBreadcrumbSegments(note: NoteData): BreadcrumbSegment[] {
 	const segments: BreadcrumbSegment[] = [
 		{
@@ -310,6 +341,7 @@ export function NoteWorkspace({
 	const hasEditsSinceVersionRef = useRef(false);
 	const versionRequestInFlightRef = useRef(false);
 	const syncInFlightRef = useRef(false);
+	const pendingChangedBlockIdsRef = useRef<Set<string>>(new Set());
 	const [canUndo, setCanUndo] = useState(false);
 	const [canRedo, setCanRedo] = useState(false);
 	const [versionsOpen, setVersionsOpen] = useState(false);
@@ -340,8 +372,8 @@ export function NoteWorkspace({
 
 	const activeNoteQuery = useQuery({
 		queryKey: activeNoteId ? queryKeys.note(activeNoteId) : (["note", "inactive"] as const),
-		queryFn: () => fetchNote(activeNoteId ?? ""),
-		enabled: Boolean(activeNoteId) && isOnline,
+		queryFn: () => fetchNoteWithLocalFallback(activeNoteId ?? "", fetchNote),
+		enabled: Boolean(activeNoteId),
 		staleTime: 30_000,
 		retry: 1,
 	});
@@ -409,6 +441,7 @@ export function NoteWorkspace({
 	const syncNoteQueryCache = useCallback(
 		(nextNote: NoteData) => {
 			queryClient.setQueryData(queryKeys.note(nextNote.id), nextNote);
+			void localNotes.upsert(noteDataToLocalRecord(nextNote));
 		},
 		[queryClient],
 	);
@@ -503,15 +536,15 @@ export function NoteWorkspace({
 		[isOnline],
 	);
 
-	const persistNoteContent = useCallback(async (noteId: string, content: unknown) => {
-		const response = await fetch(`/api/notes/${noteId}/autosave`, {
-			method: "POST",
+	const persistNoteBlocks = useCallback(async (noteId: string, content: unknown, changedBlockIds: string[]) => {
+		const response = await fetch(`/api/notes/${noteId}/blocks`, {
+			method: "PATCH",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ content }),
+			body: JSON.stringify({ content, changedBlockIds }),
 		});
 
 		if (!response.ok) {
-			throw new Error("Failed to autosave note");
+			throw new Error("Failed to persist note blocks");
 		}
 
 		return (await response.json()) as {
@@ -589,7 +622,7 @@ export function NoteWorkspace({
 			}
 
 			try {
-				await persistNoteContent(noteId, content);
+				await persistNoteBlocks(noteId, content, []);
 				await createVersionRequest(noteId, {
 					manual: false,
 					content,
@@ -598,8 +631,119 @@ export function NoteWorkspace({
 				// Session-boundary checkpointing is best-effort.
 			}
 		},
-		[createVersionRequest, isOnline, persistNoteContent],
+		[createVersionRequest, isOnline, persistNoteBlocks],
 	);
+
+	const saveContentNow = useCallback(
+		async (noteId: string, content: unknown, changedBlockIds: string[]) => {
+			const normalizedContent = normalizeBlockNoteContent(content);
+			const mergedChangedBlockIds = changedBlockIds.length > 0 ? changedBlockIds : Array.from(pendingChangedBlockIdsRef.current);
+			const isTargetActiveAtStart = noteRef.current?.id === noteId;
+			if (isTargetActiveAtStart) {
+				currentContentRef.current = normalizedContent;
+			}
+
+			const persistedSnapshot = getPersistedSnapshot(noteId);
+			if (persistedSnapshot && serializeContentSnapshot(normalizedContent) === serializeContentSnapshot(persistedSnapshot.content)) {
+				noteCache.markClean(noteId, persistedSnapshot.updatedAt);
+				return;
+			}
+
+			queueOfflineContent(noteId, normalizedContent);
+
+			if (!isOnline) {
+				await localNotes.update(noteId, { content: normalizedContent });
+				await syncQueue.enqueue({
+					operation: "UPDATE",
+					entity: "block",
+					entityId: noteId,
+					payload: {
+						content: normalizedContent,
+						changedBlockIds: mergedChangedBlockIds,
+					},
+				});
+				pendingChangedBlockIdsRef.current.clear();
+
+				if (isTargetActiveAtStart) {
+					setSaveStatus("offline");
+				}
+				return;
+			}
+
+			if (isTargetActiveAtStart) {
+				setSaveStatus("saving");
+			}
+
+			try {
+				const updated = await persistNoteBlocks(noteId, normalizedContent, mergedChangedBlockIds);
+				let nextNote: NoteData | null = null;
+
+				if (noteRef.current?.id === noteId) {
+					nextNote = updateCurrentNoteState((current) => ({
+						...current,
+						content: updated.content,
+						updatedAt: updated.updatedAt ?? current.updatedAt,
+					}));
+				}
+
+				if (nextNote) {
+					cacheNoteSnapshot(nextNote, updated.content, false);
+					syncNoteQueryCache(nextNote);
+				} else {
+					noteCache.markClean(noteId, updated.updatedAt);
+					queryClient.setQueryData<NoteData | undefined>(queryKeys.note(noteId), (existing) => {
+						if (!existing) {
+							return existing;
+						}
+
+						return {
+							...existing,
+							content: updated.content,
+							updatedAt: updated.updatedAt ?? existing.updatedAt,
+						};
+					});
+				}
+
+				if (noteRef.current?.id === noteId) {
+					markSaveSuccess();
+				}
+				pendingChangedBlockIdsRef.current.clear();
+			} catch {
+				await localNotes.update(noteId, { content: normalizedContent });
+				await syncQueue.enqueue({
+					operation: "UPDATE",
+					entity: "block",
+					entityId: noteId,
+					payload: {
+						content: normalizedContent,
+						changedBlockIds: mergedChangedBlockIds,
+					},
+				});
+				pendingChangedBlockIdsRef.current.clear();
+
+				if (noteRef.current?.id === noteId) {
+					markSaveFailure();
+					toast.error("Auto-save failed. Check your connection.", { id: "note-autosave-error" });
+				}
+			}
+		},
+		[
+			cacheNoteSnapshot,
+			getPersistedSnapshot,
+			isOnline,
+			markSaveFailure,
+			markSaveSuccess,
+			noteCache,
+			persistNoteBlocks,
+			queryClient,
+			queueOfflineContent,
+			serializeContentSnapshot,
+			syncNoteQueryCache,
+			updateCurrentNoteState,
+		],
+	);
+
+	const debouncedContentSave = useDebouncedSave(saveContentNow, 800);
 
 	useEffect(() => {
 		if (typeof navigator === "undefined") return;
@@ -790,86 +934,14 @@ export function NoteWorkspace({
 	}, [emojiPickerOpen]);
 
 	const handleSaveContent = useCallback(
-		async (noteId: string, content: unknown) => {
-			const normalizedContent = normalizeBlockNoteContent(content);
-			const isTargetActiveAtStart = noteRef.current?.id === noteId;
-			if (isTargetActiveAtStart) {
-				currentContentRef.current = normalizedContent;
+		async (noteId: string, content: unknown, changedBlockIds: string[]) => {
+			for (const blockId of changedBlockIds) {
+				pendingChangedBlockIdsRef.current.add(blockId);
 			}
 
-			const persistedSnapshot = getPersistedSnapshot(noteId);
-			if (persistedSnapshot && serializeContentSnapshot(normalizedContent) === serializeContentSnapshot(persistedSnapshot.content)) {
-				noteCache.markClean(noteId, persistedSnapshot.updatedAt);
-				return;
-			}
-
-			queueOfflineContent(noteId, normalizedContent);
-
-			if (!isOnline) {
-				if (isTargetActiveAtStart) {
-					setSaveStatus("offline");
-				}
-				return;
-			}
-
-			if (isTargetActiveAtStart) {
-				setSaveStatus("saving");
-			}
-
-			try {
-				const updated = await persistNoteContent(noteId, normalizedContent);
-				let nextNote: NoteData | null = null;
-
-				if (noteRef.current?.id === noteId) {
-					nextNote = updateCurrentNoteState((current) => ({
-						...current,
-						content: updated.content,
-						updatedAt: updated.updatedAt ?? current.updatedAt,
-					}));
-				}
-
-				if (nextNote) {
-					cacheNoteSnapshot(nextNote, updated.content, false);
-					syncNoteQueryCache(nextNote);
-				} else {
-					noteCache.markClean(noteId, updated.updatedAt);
-					queryClient.setQueryData<NoteData | undefined>(queryKeys.note(noteId), (existing) => {
-						if (!existing) {
-							return existing;
-						}
-
-						return {
-							...existing,
-							content: updated.content,
-							updatedAt: updated.updatedAt ?? existing.updatedAt,
-						};
-					});
-				}
-
-				if (noteRef.current?.id === noteId) {
-					markSaveSuccess();
-				}
-			} catch {
-				if (noteRef.current?.id === noteId) {
-					markSaveFailure();
-					toast.error("Auto-save failed. Check your connection.", { id: "note-autosave-error" });
-				}
-			}
+			debouncedContentSave.push(noteId, content, Array.from(pendingChangedBlockIdsRef.current));
 		},
-		[
-			cacheNoteSnapshot,
-			getPersistedSnapshot,
-			isOnline,
-			markSaveFailure,
-			markSaveSuccess,
-			noteCache,
-			persistNoteContent,
-			queryClient,
-			queueOfflineContent,
-			serializeContentSnapshot,
-			syncNoteQueryCache,
-			updateCurrentNoteState,
-		],
+		[debouncedContentSave],
 	);
 
 	const handleContentChange = useCallback(
@@ -978,20 +1050,6 @@ export function NoteWorkspace({
 		},
 		[handleEmojiChange],
 	);
-
-	const handleCreateNote = async () => {
-		const res = await fetch("/api/notes", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ workspaceId }),
-		});
-		if (res.ok) {
-			const newNote = await res.json();
-			onNoteCreated();
-			onOpenNote(newNote.id);
-			setIsNewNote(true);
-		}
-	};
 
 	const handleDuplicate = useCallback(async () => {
 		if (!note) return;
@@ -1355,7 +1413,7 @@ export function NoteWorkspace({
 					continue;
 				}
 
-				const updated = await persistNoteContent(dirtyNote.id, dirtyNote.content);
+				const updated = await persistNoteBlocks(dirtyNote.id, dirtyNote.content, []);
 				noteCache.markClean(dirtyNote.id, updated.updatedAt);
 
 				if (noteRef.current?.id === dirtyNote.id) {
@@ -1400,7 +1458,7 @@ export function NoteWorkspace({
 		markSaveFailure,
 		markSyncSuccess,
 		noteCache,
-		persistNoteContent,
+		persistNoteBlocks,
 		queryClient,
 		serializeContentSnapshot,
 		syncNoteQueryCache,
@@ -1475,6 +1533,11 @@ export function NoteWorkspace({
 			window.clearInterval(interval);
 		};
 	}, [createVersion, isOnline]);
+
+	useEffect(() => {
+		void debouncedContentSave.flush();
+		pendingChangedBlockIdsRef.current.clear();
+	}, [activeNoteId, debouncedContentSave]);
 
 	useEffect(() => {
 		const handleBeforeUnload = () => {
@@ -1874,59 +1937,8 @@ export function NoteWorkspace({
 		};
 	}, [isMarqueeActive]);
 
-	if (loading && !note) {
-		return (
-			<div className="flex flex-1 items-center justify-center fade-in px-6 py-8" style={{ backgroundColor: "var(--bg-app)" }}>
-				<div className="w-full max-w-5xl">
-					<EditorSkeleton />
-				</div>
-			</div>
-		);
-	}
-
 	if (!note) {
-		return (
-			<div className="flex flex-1 flex-col items-center justify-center gap-4 fade-in" style={{ backgroundColor: "var(--bg-app)" }}>
-				{!isSidebarOpen && (
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<button
-								type="button"
-								onClick={onToggleSidebar}
-								className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
-								aria-label="Open sidebar">
-								<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-							</button>
-						</TooltipTrigger>
-						<TooltipContent>Open sidebar</TooltipContent>
-					</Tooltip>
-				)}
-				<div className="flex h-16 w-16 items-center justify-center rounded-2xl smooth-bg" style={{ backgroundColor: "var(--bg-surface)" }}>
-					<FileText className="h-8 w-8" style={{ color: "var(--text-tertiary)" }} />
-				</div>
-				<div className="max-w-[32rem] px-6 text-center">
-					<h1 className="text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.02em]" style={{ color: "var(--text-primary)" }}>
-						{workspaceName}
-					</h1>
-					<p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-						Select a note or create a new one
-					</p>
-				</div>
-				<button
-					onClick={handleCreateNote}
-					className="hover-scale mt-2 flex items-center gap-2 rounded-[var(--sn-radius-md)] px-4 py-2 text-sm transition-all duration-150"
-					style={{ backgroundColor: "var(--accent-muted)", color: "var(--sn-accent)" }}
-					onMouseEnter={(e) => {
-						(e.currentTarget as HTMLElement).style.backgroundColor = "rgba(124, 106, 255, 0.25)";
-					}}
-					onMouseLeave={(e) => {
-						(e.currentTarget as HTMLElement).style.backgroundColor = "var(--accent-muted)";
-					}}>
-					<Plus className="h-4 w-4" />
-					Create your first note
-				</button>
-			</div>
-		);
+		return <LoadingContentSkeleton workspaceName={workspaceName} />;
 	}
 
 	const isNoteHydrating = loading && Boolean(note);
@@ -1946,13 +1958,15 @@ export function NoteWorkspace({
 			{/* Main editor area */}
 			<div ref={mainScrollRef} className="stacknote-mobile-bottom-space flex flex-1 flex-col overflow-y-auto" style={{}}>
 				{/* Note header bar */}
-				<div className="flex h-9 shrink-0 items-center justify-between px-4" style={{ borderBottom: "1px solid var(--border-default)" }}>
+				<ScrollRevealBar
+					revealOnScroll={false}
+					className="flex h-9 shrink-0 items-center justify-between bg-[var(--bg-app)] px-4"
+					style={{ borderBottom: "1px solid var(--border-default)" }}>
 					<div className="flex items-center gap-2">
 						{!isSidebarOpen && (
 							<Tooltip>
 								<TooltipTrigger asChild>
 									<button
-										type="button"
 										onClick={onToggleSidebar}
 										className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
 										aria-label="Open sidebar">
@@ -2072,7 +2086,7 @@ export function NoteWorkspace({
 							onDelete={handleDelete}
 						/>
 					</div>
-				</div>
+				</ScrollRevealBar>
 
 				{/* Note content */}
 				<div
@@ -2137,7 +2151,7 @@ export function NoteWorkspace({
 
 						<div className="min-w-0 flex-1">
 							<NoteTitle initialTitle={note.title} onSave={handleSaveTitle} autoFocus={isNewNote} />
-							<div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+							<div className="mt-1 flex flex-wrap items-center gap-3 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
 								<div className="flex items-center gap-1">
 									<CalendarClock className="h-3 w-3" />
 									<span>Created {new Date(note.createdAt).toLocaleString()}</span>
@@ -2152,7 +2166,7 @@ export function NoteWorkspace({
 
 					<div
 						ref={editorShellRef}
-						className="group relative mt-2 mx-auto stacknote-editor-shell"
+						className="group relative mt-6 mx-auto stacknote-editor-shell"
 						style={{
 							width: `${editorWidth}px`,
 							maxWidth: "100%",

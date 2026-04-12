@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, ChevronDown, Mic, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Clock3, Mic, ShieldCheck, Sparkles, X, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { FLASHCARD_MODEL_LIMITS, QUIZ_MODEL_LIMITS, STT_MODEL_LIMITS, TEXT_MODEL_LIMITS, formatDurationSeconds } from "@/lib/ai-limits";
 import { subscribeToAiUsageChanges } from "@/lib/ai-usage-events";
@@ -55,6 +55,17 @@ interface ModelOption {
 
 function metricPercentage(metric: CounterStat) {
 	return metric.limit > 0 ? (metric.used / metric.limit) * 100 : 0;
+}
+
+function SectionHeader({ icon: Icon, title }: { icon: LucideIcon; title: string }) {
+	return (
+		<div className="mb-4 flex items-center gap-2">
+			<Icon className="h-5 w-5" style={{ color: "var(--sn-accent)" }} />
+			<h2 className="text-base font-medium" style={{ color: "var(--text-primary)" }}>
+				{title}
+			</h2>
+		</div>
+	);
 }
 
 function UsageSkeleton() {
@@ -383,12 +394,7 @@ export function SettingsPanel({ variant, onClose }: SettingsPanelProps) {
 
 			<div className={contentClassName}>
 				<section className="mb-8">
-					<div className="mb-4 flex items-center gap-2">
-						<Sparkles className="h-5 w-5" style={{ color: "var(--sn-accent)" }} />
-						<h2 className="text-base font-medium" style={{ color: "var(--text-primary)" }}>
-							AI Settings
-						</h2>
-					</div>
+					<SectionHeader icon={Sparkles} title="AI Settings" />
 
 					<div className="mb-4 rounded-lg border p-4" style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
 						<label className="mb-2 block text-sm font-medium" style={{ color: "var(--text-primary)" }}>
@@ -431,9 +437,7 @@ export function SettingsPanel({ variant, onClose }: SettingsPanelProps) {
 				</section>
 
 				<section>
-					<h2 className="mb-4 text-base font-medium" style={{ color: "var(--text-primary)" }}>
-						24-Hour Usage
-					</h2>
+					<SectionHeader icon={Clock3} title="24-Hour Usage" />
 
 					{loadingUsage ? (
 						<UsageSkeleton />
@@ -656,9 +660,7 @@ export function SettingsPanel({ variant, onClose }: SettingsPanelProps) {
 				</section>
 
 				<section className="mt-8">
-					<h2 className="mb-4 text-base font-medium" style={{ color: "var(--text-primary)" }}>
-						Daily Limits
-					</h2>
+					<SectionHeader icon={ShieldCheck} title="Daily Limits" />
 					<div className="rounded-lg border p-4" style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
 						<div className="space-y-4 text-sm" style={{ color: "var(--text-secondary)" }}>
 							<div>

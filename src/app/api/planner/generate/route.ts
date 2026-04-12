@@ -59,14 +59,15 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: "Exam not found" }, { status: 404 });
 	}
 
-	if (exam.noteIds.length === 0) {
+	const examNoteIds = Array.isArray(exam.noteIds) ? exam.noteIds : [];
+	if (examNoteIds.length === 0) {
 		return NextResponse.json({ error: "This exam does not have any linked notes yet" }, { status: 400 });
 	}
 
 	const notes = await prisma.note.findMany({
 		where: {
 			id: {
-				in: exam.noteIds,
+				in: examNoteIds,
 			},
 			isArchived: false,
 			deletedAt: null,

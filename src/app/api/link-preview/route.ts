@@ -17,6 +17,7 @@ interface LinkPreviewPayload {
 }
 
 const REQUEST_TIMEOUT_MS = 8000;
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
 function parseAttributes(tag: string): Record<string, string> {
 	const attributes: Record<string, string> = {};
@@ -240,7 +241,11 @@ export async function GET(request: NextRequest) {
 		});
 
 		if (!response.ok) {
-			return NextResponse.json(result);
+			return NextResponse.json(result, {
+				headers: {
+					"Cache-Control": MUTABLE_CACHE_CONTROL,
+				},
+			});
 		}
 
 		const finalUrl = response.url || url;
@@ -283,9 +288,17 @@ export async function GET(request: NextRequest) {
 		const faviconHref = extractFaviconHref(html);
 		result.favicon = absolutizeUrl(finalUrl, faviconHref) || `${new URL(finalUrl).origin}/favicon.ico`;
 
-		return NextResponse.json(result);
+		return NextResponse.json(result, {
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		});
 	} catch {
-		return NextResponse.json(result);
+		return NextResponse.json(result, {
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		});
 	} finally {
 		clearTimeout(timeout);
 	}

@@ -1,5 +1,9 @@
-function getGreeting() {
-	const hour = new Date().getHours();
+"use client";
+
+import { useEffect, useState } from "react";
+
+function getGreeting(date: Date) {
+	const hour = date.getHours();
 	if (hour < 12) {
 		return "Good morning";
 	}
@@ -9,12 +13,12 @@ function getGreeting() {
 	return "Good evening";
 }
 
-function getDateLabel() {
+function getDateLabel(date: Date) {
 	return new Intl.DateTimeFormat(undefined, {
 		weekday: "long",
 		month: "long",
 		day: "numeric",
-	}).format(new Date());
+	}).format(date);
 }
 
 interface HomeHeroProps {
@@ -23,6 +27,16 @@ interface HomeHeroProps {
 }
 
 export function HomeHero({ displayName, statusLine }: HomeHeroProps) {
+	const [timeCopy, setTimeCopy] = useState<{ greeting: string; dateLabel: string } | null>(null);
+
+	useEffect(() => {
+		const now = new Date();
+		setTimeCopy({
+			greeting: getGreeting(now),
+			dateLabel: getDateLabel(now),
+		});
+	}, []);
+
 	return (
 		<section
 			className="rounded-[28px] border border-white/10 px-6 py-6 sm:px-8 sm:py-7"
@@ -32,9 +46,9 @@ export function HomeHero({ displayName, statusLine }: HomeHeroProps) {
 			}}>
 			<p className="text-xs font-medium uppercase tracking-widest text-zinc-500">Home</p>
 			<h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-white sm:text-[2rem]">
-				{getGreeting()}, {displayName}
+				{timeCopy ? `${timeCopy.greeting}, ${displayName}` : "\u00a0"}
 			</h1>
-			<p className="mt-2 text-sm text-zinc-500">{getDateLabel()}</p>
+			<p className="mt-2 text-sm text-zinc-500">{timeCopy?.dateLabel ?? "\u00a0"}</p>
 			<p className="mt-4 text-sm text-zinc-400">{statusLine}</p>
 		</section>
 	);

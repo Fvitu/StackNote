@@ -18,6 +18,22 @@ type ViewerSize = {
 	height: number;
 };
 
+type Point = {
+	x: number;
+	y: number;
+};
+
+type PinchState = {
+	pointerIds: [number, number];
+	initialDistance: number;
+	initialMidpoint: Point;
+	initialZoom: number;
+	initialPanX: number;
+	initialPanY: number;
+	centerX: number;
+	centerY: number;
+};
+
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 5;
 const ZOOM_STEP = 0.25;
@@ -57,11 +73,14 @@ function ImagePreviewContent({ url, name }: { url: string; name: string }) {
 	const [isPanning, setIsPanning] = useState(false);
 	const viewerWheelTargetRef = useRef<HTMLDivElement | null>(null);
 	const dragStateRef = useRef<{
+		pointerId: number;
 		startX: number;
 		startY: number;
 		startPanX: number;
 		startPanY: number;
 	} | null>(null);
+	const pinchStateRef = useRef<PinchState | null>(null);
+	const pointerPositionsRef = useRef<Map<number, Point>>(new Map());
 
 	useEffect(() => {
 		if (!viewerSize) {
@@ -115,7 +134,52 @@ function ImagePreviewContent({ url, name }: { url: string; name: string }) {
 		});
 	};
 
+	const startPinch = (firstPointerId: number, secondPointerId: number) => {
+		const firstPoint = pointerPositionsRef.current.get(firstPointerId);
+		const secondPoint = pointerPositionsRef.current.get(secondPointerId);
+		const viewerElement = viewerWheelTargetRef.current;
+
+		if (!firstPoint || !secondPoint || !viewerElement) {
+			return;
+		}
+
+		const viewerRect = viewerElement.getBoundingClientRect();
+		pinchStateRef.current = {
+			pointerIds: [firstPointerId, secondPointerId],
+			initialDistance: Math.max(1, Math.hypot(secondPoint.x - firstPoint.x, secondPoint.y - firstPoint.y)),
+			initialMidpoint: {
+				x: (firstPoint.x + secondPoint.x) / 2,
+				y: (firstPoint.y + secondPoint.y) / 2,
+			},
+			initialZoom: zoom,
+			initialPanX: pan.x,
+			initialPanY: pan.y,
+			centerX: viewerRect.left + viewerRect.width / 2,
+			centerY: viewerRect.top + viewerRect.height / 2,
+		};
+		dragStateRef.current = null;
+		setIsPanning(true);
+	};
+
 	const handleViewerPointerDown = (event: ReactPointerEvent<HTMLImageElement>) => {
+		pointerPositionsRef.current.set(event.pointerId, {
+			x: event.clientX,
+			y: event.clientY,
+		});
+
+		const activePointerIds = Array.from(pointerPositionsRef.current.keys());
+		if (activePointerIds.length === 2) {
+			event.preventDefault();
+			event.stopPropagation();
+			startPinch(activePointerIds[0], activePointerIds[1]);
+			try {
+				event.currentTarget.setPointerCapture(event.pointerId);
+			} catch {
+				// Ignore capture failures.
+			}
+			return;
+		}
+
 		if (zoom <= 1) {
 			return;
 		}
@@ -123,6 +187,7 @@ function ImagePreviewContent({ url, name }: { url: string; name: string }) {
 		event.preventDefault();
 		event.stopPropagation();
 		dragStateRef.current = {
+			pointerId: event.pointerId,
 			startX: event.clientX,
 			startY: event.clientY,
 			startPanX: pan.x,
@@ -137,12 +202,58 @@ function ImagePreviewContent({ url, name }: { url: string; name: string }) {
 	};
 
 	const handleViewerPointerMove = (event: ReactPointerEvent<HTMLImageElement>) => {
+		pointerPositionsRef.current.set(event.pointerId, {
+			x: event.clientX,
+			y: event.clientY,
+		});
+
+		const pinchState = pinchStateRef.current;
+		if (pinchState) {
+			const firstPoint = pointerPositionsRef.current.get(pinchState.pointerIds[0]);
+			const secondPoint = pointerPositionsRef.current.get(pinchState.pointerIds[1]);
+			if (!firstPoint || !secondPoint) {
+				return;
+			}
+
+			event.preventDefault();
+			event.stopPropagation();
+
+			const currentMidpoint = {
+				x: (firstPoint.x + secondPoint.x) / 2,
+				y: (firstPoint.y + secondPoint.y) / 2,
+			};
+			const currentDistance = Math.max(1, Math.hypot(secondPoint.x - firstPoint.x, secondPoint.y - firstPoint.y));
+			const nextZoom = clampZoom(pinchState.initialZoom * (currentDistance / pinchState.initialDistance));
+
+			if (nextZoom <= 1) {
+				setZoom(nextZoom);
+				setPan({ x: 0, y: 0 });
+				return;
+			}
+
+			setZoom(nextZoom);
+			setPan({
+				x:
+					pinchState.initialPanX +
+					currentMidpoint.x -
+					pinchState.centerX -
+					(nextZoom / pinchState.initialZoom) * (pinchState.initialMidpoint.x - pinchState.centerX),
+				y:
+					pinchState.initialPanY +
+					currentMidpoint.y -
+					pinchState.centerY -
+					(nextZoom / pinchState.initialZoom) * (pinchState.initialMidpoint.y - pinchState.centerY),
+			});
+			return;
+		}
+
 		const dragState = dragStateRef.current;
-		if (!dragState) {
+		if (!dragState || dragState.pointerId !== event.pointerId) {
 			return;
 		}
 
 		event.preventDefault();
+		event.stopPropagation();
 		setPan({
 			x: dragState.startPanX + (event.clientX - dragState.startX),
 			y: dragState.startPanY + (event.clientY - dragState.startY),
@@ -150,12 +261,32 @@ function ImagePreviewContent({ url, name }: { url: string; name: string }) {
 	};
 
 	const endViewerPan = (event: ReactPointerEvent<HTMLImageElement>) => {
-		if (!dragStateRef.current) {
-			return;
+		pointerPositionsRef.current.delete(event.pointerId);
+
+		if (dragStateRef.current?.pointerId === event.pointerId) {
+			dragStateRef.current = null;
 		}
 
-		dragStateRef.current = null;
-		setIsPanning(false);
+		const pinchState = pinchStateRef.current;
+		if (pinchState && pinchState.pointerIds.includes(event.pointerId)) {
+			pinchStateRef.current = null;
+			setIsPanning(false);
+
+			if (zoom > 1 && pointerPositionsRef.current.size === 1) {
+				const [remainingPointerId, remainingPoint] = Array.from(pointerPositionsRef.current.entries())[0];
+				dragStateRef.current = {
+					pointerId: remainingPointerId,
+					startX: remainingPoint.x,
+					startY: remainingPoint.y,
+					startPanX: pan.x,
+					startPanY: pan.y,
+				};
+				setIsPanning(true);
+			}
+		} else if (!dragStateRef.current) {
+			setIsPanning(false);
+		}
+
 		try {
 			event.currentTarget.releasePointerCapture(event.pointerId);
 		} catch {

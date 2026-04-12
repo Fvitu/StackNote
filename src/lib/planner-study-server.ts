@@ -291,11 +291,12 @@ function serializePlannerStudyCard(
 }
 
 async function ensureExamDeck(userId: string, exam: PlannerExamRecord) {
-	if (exam.deckIds.length > 0) {
+	const existingDeckIds = Array.isArray(exam.deckIds) ? exam.deckIds : [];
+	if (existingDeckIds.length > 0) {
 		const existingDeck = await prisma.flashcardDeck.findFirst({
 			where: {
 				id: {
-					in: exam.deckIds,
+					in: existingDeckIds,
 				},
 				userId,
 			},
@@ -344,7 +345,7 @@ async function generatePlannerStudyCards(input: {
 	const notes = await prisma.note.findMany({
 		where: {
 			id: {
-				in: input.exam.noteIds,
+				in: Array.isArray(input.exam.noteIds) ? input.exam.noteIds : [],
 			},
 			isArchived: false,
 			deletedAt: null,
@@ -463,8 +464,10 @@ async function takeNextPlannerStudyCard(userId: string, queue: PlannerStudyQueue
 			continue;
 		}
 
-		if (currentExamQueue.queuedCards.length > 0) {
-			const [currentCard, ...restCards] = currentExamQueue.queuedCards;
+		const queuedCards = Array.isArray(currentExamQueue.queuedCards) ? currentExamQueue.queuedCards : [];
+
+		if (queuedCards.length > 0) {
+			const [currentCard, ...restCards] = queuedCards;
 			return {
 				currentCard,
 				queue: queue.map((queueExam, queueIndex) =>
@@ -525,14 +528,14 @@ async function takeNextPlannerStudyCard(userId: string, queue: PlannerStudyQueue
 			throw new PlannerStudyError("Failed to generate the next study card", 500);
 		}
 
-		const [currentCard, ...queuedCards] = generatedCards;
+		const [currentCard, ...generatedCardsToQueue] = generatedCards;
 		return {
 			currentCard,
 			queue: queue.map((queueExam, queueIndex) =>
 				queueIndex === index
 					? {
 							...queueExam,
-							queuedCards,
+							queuedCards: generatedCardsToQueue,
 							remainingCount: Math.max(0, queueExam.remainingCount - generatedCards.length),
 						}
 					: queueExam,

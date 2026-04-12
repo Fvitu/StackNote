@@ -33,6 +33,8 @@ type TrashListEntry =
 			deletedAt: Date;
 	  };
 
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
 function parseLimit(rawValue: string | null) {
 	const parsed = Number(rawValue ?? "20");
 	if (!Number.isFinite(parsed)) {
@@ -306,5 +308,9 @@ export async function GET(request: NextRequest) {
 		nextCursor,
 	};
 
-	return NextResponse.json(response);
+	return NextResponse.json(response, {
+		headers: {
+			"Cache-Control": MUTABLE_CACHE_CONTROL,
+		},
+	});
 }

@@ -29,6 +29,7 @@ import { NoteIconPickerDialog } from "./NoteIconPickerDialog";
 import { signOutAction } from "@/app/actions";
 import { fetchJson } from "@/lib/api-client";
 import { fetchNote } from "@/lib/note-client";
+import { localNotes } from "@/lib/db/local";
 import { buildFolderDepthMap, canCreateFolderUnderParent } from "@/lib/folder-depth";
 import { queryKeys } from "@/lib/query-keys";
 import { updateNoteInTree } from "@/lib/tree-helpers";
@@ -79,6 +80,8 @@ const DRAG_SCROLL_STEP_PX = 24;
 const TREE_INDENT_PX = 12;
 const ROW_BASE_PADDING_PX = 8;
 const TRASH_LAST_SEEN_STORAGE_PREFIX = "stacknote:trash-last-seen:";
+const RECENT_NOTE_LRU_STORAGE_KEY = "stacknote:recent-note-lru";
+const RECENT_NOTE_LRU_LIMIT = 10;
 
 function getGuideOffset(depth: number) {
 	return ROW_BASE_PADDING_PX + depth * TREE_INDENT_PX - 10;
@@ -161,6 +164,46 @@ function findNoteInTree(tree: WorkspaceTree, noteId: string): NoteTreeItem | nul
 	};
 
 	return tree.rootNotes.find((note) => note.id === noteId) ?? visitFolders(tree.folders);
+}
+
+function readRecentNoteLru(): string[] {
+	if (typeof window === "undefined") {
+		return [];
+	}
+
+	try {
+		const rawValue = window.localStorage.getItem(RECENT_NOTE_LRU_STORAGE_KEY);
+		if (!rawValue) {
+			return [];
+		}
+
+		const parsed = JSON.parse(rawValue) as unknown;
+		if (!Array.isArray(parsed)) {
+			return [];
+		}
+
+		return parsed.filter((item): item is string => typeof item === "string").slice(0, RECENT_NOTE_LRU_LIMIT);
+	} catch {
+		return [];
+	}
+}
+
+function writeRecentNoteLru(noteIds: string[]) {
+	if (typeof window === "undefined") {
+		return;
+	}
+
+	window.localStorage.setItem(RECENT_NOTE_LRU_STORAGE_KEY, JSON.stringify(noteIds.slice(0, RECENT_NOTE_LRU_LIMIT)));
+}
+
+function recordRecentlyVisitedNote(noteId: string) {
+	const current = readRecentNoteLru();
+	const next = [noteId, ...current.filter((id) => id !== noteId)].slice(0, RECENT_NOTE_LRU_LIMIT);
+	writeRecentNoteLru(next);
+}
+
+function isRecentNote(noteId: string) {
+	return readRecentNoteLru().includes(noteId);
 }
 
 export function Sidebar({
@@ -249,8 +292,8 @@ export function Sidebar({
 		queryFn: () => fetchJson<TrashListResponse>("/api/trash?limit=1"),
 		staleTime: 30_000,
 	});
-	const hasTrashItems = (trashStatusQuery.data?.items.length ?? 0) > 0;
-	const latestTrashDeletedAt = trashStatusQuery.data?.items[0]?.deletedAt ?? null;
+	const hasTrashItems = (trashStatusQuery.data?.items?.length ?? 0) > 0;
+	const latestTrashDeletedAt = trashStatusQuery.data?.items?.[0]?.deletedAt ?? null;
 	const [lastSeenTrashDeletedAt, setLastSeenTrashDeletedAt] = useState<string | null>(null);
 	const hasUnreadTrashItems = useMemo(() => {
 		if (!hasTrashItems || !latestTrashDeletedAt) {
@@ -307,6 +350,7 @@ export function Sidebar({
 
 	const openNoteInWorkspace = useCallback(
 		(noteId: string, folderId: string | null) => {
+			recordRecentlyVisitedNote(noteId);
 			setActiveNote(noteId);
 			onFolderVisited?.(folderId);
 			router.push(`/note/${encodeURIComponent(noteId)}`);
@@ -321,8 +365,50 @@ export function Sidebar({
 				const newNote = await onCreateNoteOptimistic(folderId);
 				if (newNote) {
 					openNoteInWorkspace(newNote.id, folderId ?? null);
+					return;
+				}
+
+				if (typeof navigator !== "undefined" && !navigator.onLine) {
+					const localId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `local-${Date.now()}`;
+					const nowIso = new Date().toISOString();
+					await localNotes.create({
+						id: localId,
+						title: "Untitled",
+						emoji: null,
+						workspaceId,
+						folderId: folderId ?? null,
+						coverImage: null,
+						coverImageMeta: null,
+						content: [],
+						createdAt: nowIso,
+						updatedAt: nowIso,
+						editorWidth: null,
+						_syncStatus: "pending",
+					});
+					openNoteInWorkspace(localId, folderId ?? null);
 				}
 			} else {
+				if (typeof navigator !== "undefined" && !navigator.onLine) {
+					const localId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `local-${Date.now()}`;
+					const nowIso = new Date().toISOString();
+					await localNotes.create({
+						id: localId,
+						title: "Untitled",
+						emoji: null,
+						workspaceId,
+						folderId: folderId ?? null,
+						coverImage: null,
+						coverImageMeta: null,
+						content: [],
+						createdAt: nowIso,
+						updatedAt: nowIso,
+						editorWidth: null,
+						_syncStatus: "pending",
+					});
+					openNoteInWorkspace(localId, folderId ?? null);
+					return;
+				}
+
 				const res = await fetch("/api/notes", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
@@ -343,12 +429,16 @@ export function Sidebar({
 			return;
 		}
 
+		if (!isRecentNote(noteId)) {
+			return;
+		}
+
 		void queryClient.prefetchQuery({
 			queryKey: queryKeys.note(noteId),
 			queryFn: () => fetchNote(noteId),
 			staleTime: 30_000,
 		});
-	}, 200);
+	}, 100);
 
 	const handleCreateFolder = useCallback(
 		async (parentId?: string) => {
@@ -422,6 +512,16 @@ export function Sidebar({
 					router.push("/");
 				}
 			} else {
+				if (type === "note" && typeof navigator !== "undefined" && !navigator.onLine) {
+					await localNotes.delete(id);
+					await queryClient.invalidateQueries({ queryKey: queryKeys.trashStatus });
+					if (state.activeNoteId === id) {
+						setActiveNote(null);
+						router.push("/");
+					}
+					return;
+				}
+
 				const endpoint = type === "folder" ? `/api/folders/${id}` : `/api/notes/${id}`;
 				await fetch(endpoint, { method: "DELETE" });
 				await queryClient.invalidateQueries({ queryKey: queryKeys.trashStatus });
@@ -1065,8 +1165,7 @@ export function Sidebar({
 									setIsWorkspaceMenuOpen(false);
 									await signOutAction();
 								}}
-								className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-destructive/10"
-								style={{ color: "var(--text-primary)" }}>
+								className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors text-[var(--text-primary)] hover:text-destructive hover:bg-destructive/10">
 								<LogOut className="h-3.5 w-3.5" />
 								Sign out
 							</button>

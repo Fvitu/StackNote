@@ -9,6 +9,8 @@ interface UpdateSessionBody {
 	contextNoteIds?: unknown;
 }
 
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
 function jsonError(message: string, status: number) {
 	return NextResponse.json({ error: message }, { status });
 }
@@ -89,16 +91,23 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
 		},
 	});
 
-	return NextResponse.json({
-		session: mapSession(aiSession),
-		messages: messages.map((message) => ({
-			id: message.id,
-			role: message.role,
-			content: message.content,
-			model: message.model,
-			timestamp: message.createdAt,
-		})),
-	});
+	return NextResponse.json(
+		{
+			session: mapSession(aiSession),
+			messages: messages.map((message) => ({
+				id: message.id,
+				role: message.role,
+				content: message.content,
+				model: message.model,
+				timestamp: message.createdAt,
+			})),
+		},
+		{
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

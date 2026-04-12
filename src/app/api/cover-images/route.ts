@@ -5,6 +5,7 @@ import type { UnsplashCoverSearchResult } from "@/lib/note-cover";
 const UNSPLASH_API_BASE = "https://api.unsplash.com";
 const DEFAULT_RESULTS = 18;
 const MAX_RESULTS = 24;
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
 function withUtm(url: string): string {
 	const parsed = new URL(url);
@@ -102,9 +103,16 @@ export async function GET(request: NextRequest) {
 
 	const results = rawResults.map((photo) => mapUnsplashPhoto(photo)).filter((photo): photo is UnsplashCoverSearchResult => photo !== null);
 
-	return NextResponse.json({
-		results,
-		page,
-		totalPages: payload && !Array.isArray(payload) && typeof payload.total_pages === "number" ? payload.total_pages : undefined,
-	});
+	return NextResponse.json(
+		{
+			results,
+			page,
+			totalPages: payload && !Array.isArray(payload) && typeof payload.total_pages === "number" ? payload.total_pages : undefined,
+		},
+		{
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { NOTE_VERSION_LIMIT } from "@/lib/note-versioning";
 import { autosaveNoteContent, createNoteVersion } from "@/lib/note-server";
 
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
 async function getAuthorizedNote(noteId: string, userId: string) {
 	const note = await prisma.note.findFirst({
 		where: {
@@ -55,10 +57,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 		},
 	});
 
-	return NextResponse.json({
-		noteId: id,
-		versions,
-	});
+	return NextResponse.json(
+		{
+			noteId: id,
+			versions,
+		},
+		{
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

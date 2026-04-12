@@ -9,6 +9,8 @@ import { validateNoteTitle } from "@/lib/item-name-validation";
 import { buildSearchableTextValue } from "@/lib/searchable-text";
 import { getNoteSchemaCapabilities } from "@/lib/note-schema";
 
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
 type FolderPathSegment = {
 	id: string;
 	name: string;
@@ -48,7 +50,7 @@ async function buildFolderPathSegments(workspaceId: string, folderId: string | n
 	return segments;
 }
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
 	const session = await auth();
 	if (!session?.user?.id) {
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -96,13 +98,32 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 	const parsedCoverMeta = parseNoteCoverMeta(note.coverImageMeta);
 	const coverImage = parsedCoverMeta?.source === "upload" ? buildFileAccessUrl(parsedCoverMeta.fileId) : note.coverImage;
 	const folderPath = await buildFolderPathSegments(workspaceId, note.folderId);
+	const etag = `W/\"note-${note.id}-${note.updatedAt.getTime()}\"`;
 
-	return NextResponse.json({
-		...noteData,
-		coverImage,
-		folderPath,
-		content: normalizeBlockNoteContent(note.content),
-	});
+	if (req.headers.get("if-none-match") === etag) {
+		return new NextResponse(null, {
+			status: 304,
+			headers: {
+				ETag: etag,
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		});
+	}
+
+	return NextResponse.json(
+		{
+			...noteData,
+			coverImage,
+			folderPath,
+			content: normalizeBlockNoteContent(note.content),
+		},
+		{
+			headers: {
+				ETag: etag,
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -196,7 +217,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 		await invalidateWorkspaceTree(session.user.id, note.workspaceId);
 	}
 
-	return NextResponse.json(updated);
+	return NextResponse.json(updated, {
+		headers: {
+			"Cache-Control": MUTABLE_CACHE_CONTROL,
+		},
+	});
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -236,5 +261,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
 	await invalidateWorkspaceTree(session.user.id, note.workspaceId);
 
-	return NextResponse.json({ success: true });
+	return NextResponse.json(
+		{ success: true },
+		{
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }

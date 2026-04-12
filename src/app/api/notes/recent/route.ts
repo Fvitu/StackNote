@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
 export async function GET(request: NextRequest) {
 	const session = await auth();
 	if (!session?.user?.id) {
@@ -32,5 +34,12 @@ export async function GET(request: NextRequest) {
 		},
 	});
 
-	return NextResponse.json({ notes });
+	return NextResponse.json(
+		{ notes },
+		{
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }

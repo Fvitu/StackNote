@@ -1,7 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { createAdminClient } from "@/lib/supabase/server";
-
-const STORAGE_BUCKET = "stacknote-files";
+import { collectStoredFilePathsForNotes, deleteStoredObjects } from "@/lib/trash";
 
 export const GUEST_INACTIVITY_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
@@ -9,14 +7,6 @@ export const GUEST_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 
 let cleanupPromise: Promise<void> | null = null;
 let lastCleanupAt = 0;
-
-function chunk<T>(items: T[], size: number): T[][] {
-	const chunks: T[][] = [];
-	for (let i = 0; i < items.length; i += size) {
-		chunks.push(items.slice(i, i + size));
-	}
-	return chunks;
-}
 
 export function createGuestIdentity() {
 	const nonce = crypto.randomUUID().replace(/-/g, "");
@@ -54,29 +44,23 @@ export async function createGuestUserWithWorkspace() {
 	return user;
 }
 
-async function removeStoredFiles(paths: string[]) {
-	if (!paths.length) {
-		return;
-	}
-
-	const supabase = createAdminClient();
-
-	for (const batch of chunk(paths, 100)) {
-		const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(batch);
-		if (error) {
-			console.error("Failed removing guest files from storage:", error);
-		}
-	}
-}
-
 export async function purgeGuestUser(userId: string) {
-	const files = await prisma.file.findMany({
-		where: { userId },
-		select: { path: true },
+	const notes = await prisma.note.findMany({
+		where: {
+			workspace: {
+				userId,
+			},
+		},
+		select: {
+			id: true,
+		},
 	});
 
-	const uniquePaths = Array.from(new Set(files.map((file) => file.path).filter(Boolean)));
-	await removeStoredFiles(uniquePaths);
+	const noteIds = notes.map((note) => note.id);
+	const paths = await collectStoredFilePathsForNotes(prisma, noteIds);
+	if (paths.length > 0) {
+		await deleteStoredObjects(paths);
+	}
 
 	await prisma.user.deleteMany({
 		where: {

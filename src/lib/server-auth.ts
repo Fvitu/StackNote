@@ -254,7 +254,7 @@ export async function getAuthSession(input?: SessionCookieReader): Promise<AppAu
 		isGuest: session.user.isGuest,
 		guestLastActiveAt: session.user.guestLastActiveAt,
 	};
-	const isGoogleUser = session.user.accounts.length > 0;
+	const isGoogleUser = Array.isArray(session.user.accounts) && session.user.accounts.length > 0;
 	if (user.isGuest) {
 		if (isGuestExpired(user.guestLastActiveAt)) {
 			await purgeGuestUser(user.id);

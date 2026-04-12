@@ -36,6 +36,7 @@ class PlannerInputError extends Error {
 }
 
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
 function parseDateKeyToUtcDate(value: string) {
 	const match = DATE_KEY_PATTERN.exec(value);
@@ -350,31 +351,38 @@ export async function GET() {
 		];
 	});
 
-	return NextResponse.json({
-		notes: notes.map((note) => ({
-			id: note.id,
-			title: note.title,
-			excerpt: note.searchableText?.slice(0, 180) ?? null,
-			updatedAt: note.updatedAt.toISOString(),
-		})),
-		exams: serializedExams.map((exam) => ({
-			id: exam.id,
-			title: exam.title,
-			subject: exam.subject,
-			examDate: exam.examDate,
-			noteIds: exam.noteIds,
-			dailyStudyMinutes: exam.dailyStudyMinutes,
-			plannedQuestionCount: exam.studyPlanDays.reduce((sum, day) => sum + getPlanDayQuestionCount(day), 0),
-		})),
-		todaysPlan: todaysPlanDays.map((planDay) => ({
-			id: planDay.id,
-			examId: planDay.examId,
-			examTitle: planDay.exam?.title ?? "",
-			date: planDay.date,
-			questionCount: getPlanDayQuestionCount(planDay),
-			estimatedMinutes: planDay.estimatedMinutes,
-		})),
-	});
+	return NextResponse.json(
+		{
+			notes: notes.map((note) => ({
+				id: note.id,
+				title: note.title,
+				excerpt: note.searchableText?.slice(0, 180) ?? null,
+				updatedAt: note.updatedAt.toISOString(),
+			})),
+			exams: serializedExams.map((exam) => ({
+				id: exam.id,
+				title: exam.title,
+				subject: exam.subject,
+				examDate: exam.examDate,
+				noteIds: exam.noteIds,
+				dailyStudyMinutes: exam.dailyStudyMinutes,
+				plannedQuestionCount: exam.studyPlanDays.reduce((sum, day) => sum + getPlanDayQuestionCount(day), 0),
+			})),
+			todaysPlan: todaysPlanDays.map((planDay) => ({
+				id: planDay.id,
+				examId: planDay.examId,
+				examTitle: planDay.exam?.title ?? "",
+				date: planDay.date,
+				questionCount: getPlanDayQuestionCount(planDay),
+				estimatedMinutes: planDay.estimatedMinutes,
+			})),
+		},
+		{
+			headers: {
+				"Cache-Control": MUTABLE_CACHE_CONTROL,
+			},
+		},
+	);
 }
 
 export async function POST(request: NextRequest) {
@@ -474,6 +482,7 @@ export async function PATCH(request: NextRequest) {
 		}
 
 		const deckTitle = payload.subject ?? payload.title;
+		const existingDeckIds = Array.isArray(existingExam.deckIds) ? existingExam.deckIds : [];
 		const exam = await prisma.$transaction(async (tx) => {
 			const updatedExam = await tx.exam.update({
 				where: { id: existingExam.id },
@@ -486,11 +495,11 @@ export async function PATCH(request: NextRequest) {
 				},
 			});
 
-			if (existingExam.deckIds.length > 0) {
+			if (existingDeckIds.length > 0) {
 				await tx.flashcardDeck.updateMany({
 					where: {
 						id: {
-							in: existingExam.deckIds,
+							in: existingDeckIds,
 						},
 						userId: session.user.id,
 					},

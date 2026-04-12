@@ -16,10 +16,12 @@ import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { TrashPanel } from "@/components/trash/TrashPanel";
 import { QuickNoteWidget } from "@/components/quick-note/QuickNoteWidget";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
+import { SyncStatusBar } from "@/components/pwa/SyncStatusBar";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKeyboardShortcut } from "@/hooks/useKeyboardShortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fetchJson, fetchJsonOrNullOnNotFound } from "@/lib/api-client";
+import { localNotes } from "@/lib/db/local";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkspaceReorderPayload } from "@/lib/workspace-tree-view";
 import type { BootstrapResponse } from "@/lib/bootstrap";
@@ -79,6 +81,7 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 		enabled: workspaceId.length > 0,
 		initialData: bootstrapData?.tree,
 		staleTime: 30_000,
+		refetchOnWindowFocus: true,
 	});
 
 	const tree = treeQuery.data ?? EMPTY_TREE;
@@ -418,6 +421,39 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 
 	const handleCreateNote = useCallback(
 		async (folderId?: string) => {
+			if (typeof navigator !== "undefined" && !navigator.onLine) {
+				const localId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `local-${Date.now()}`;
+				const nowIso = new Date().toISOString();
+
+				await localNotes.create({
+					id: localId,
+					title: "Untitled",
+					emoji: null,
+					workspaceId,
+					folderId: folderId ?? null,
+					coverImage: null,
+					coverImageMeta: null,
+					content: [],
+					createdAt: nowIso,
+					updatedAt: nowIso,
+					editorWidth: null,
+					_syncStatus: "pending",
+				});
+
+				const treeKey = queryKeys.workspaceTree(workspaceId);
+				const currentTree = queryClient.getQueryData<WorkspaceTree>(treeKey) ?? EMPTY_TREE;
+				const offlineNote: NoteTreeItem = {
+					id: localId,
+					title: "Untitled",
+					emoji: null,
+					type: "note",
+				};
+				queryClient.setQueryData(treeKey, addNoteToTree(currentTree, offlineNote, folderId));
+				handleOpenNote(localId);
+				toast.success("Note created offline");
+				return { id: localId };
+			}
+
 			const tempId = `temp-${Date.now()}`;
 			const tempNote: NoteTreeItem = {
 				id: tempId,
@@ -449,7 +485,7 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 
 			return result;
 		},
-		[handleOpenNote, optimisticAction, workspaceId],
+		[handleOpenNote, optimisticAction, queryClient, workspaceId],
 	);
 
 	const handleCreateFolder = useCallback(
@@ -488,6 +524,24 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 
 	const handleDeleteNote = useCallback(
 		async (noteId: string) => {
+			if (typeof navigator !== "undefined" && !navigator.onLine) {
+				const localDeleted = await localNotes.delete(noteId);
+				if (!localDeleted) {
+					toast.error("Failed to move note to Trash");
+					return null;
+				}
+
+				const treeKey = queryKeys.workspaceTree(workspaceId);
+				const currentTree = queryClient.getQueryData<WorkspaceTree>(treeKey) ?? EMPTY_TREE;
+				queryClient.setQueryData(treeKey, removeNoteFromTree(currentTree, noteId));
+				await Promise.all([
+					queryClient.invalidateQueries({ queryKey: queryKeys.trashStatus }),
+					queryClient.invalidateQueries({ queryKey: queryKeys.trashList }),
+				]);
+				toast.success("Moved to Trash");
+				return;
+			}
+
 			const result = await optimisticAction(
 				(currentTree) => removeNoteFromTree(currentTree, noteId),
 				async () => {
@@ -507,7 +561,7 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 
 			return result;
 		},
-		[optimisticAction, queryClient],
+		[optimisticAction, queryClient, workspaceId],
 	);
 
 	const handleDeleteFolder = useCallback(
@@ -909,6 +963,7 @@ function AppShellInner({ initialShell, children }: AppShellProps) {
 				{!isHomeRoute && !isPlannerRoute ? (
 					<PomodoroWidget sidebarOffset={isSidebarVisible && !isMobileSidebarMode ? state.sidebarWidth + 24 : 24} isHidden={isAiPanelFullscreen} />
 				) : null}
+				<SyncStatusBar />
 				<InstallPrompt />
 				<SearchModalClient
 					workspaceId={workspaceId}

@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const EMPTY_CONTENT: Prisma.InputJsonValue = [];
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
 export async function GET() {
 	const session = await auth();
@@ -21,7 +22,11 @@ export async function GET() {
 		},
 	});
 
-	return NextResponse.json(quickNote);
+	return NextResponse.json(quickNote, {
+		headers: {
+			"Cache-Control": MUTABLE_CACHE_CONTROL,
+		},
+	});
 }
 
 export async function PATCH(request: NextRequest) {

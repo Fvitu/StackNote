@@ -258,7 +258,7 @@ export default function PlannerPage() {
 
 		const sessionTitle =
 			normalizedItems.length === 1
-				? (payload?.exams.find((exam) => exam.id === normalizedItems[0]?.examId)?.title ?? "Planner Session")
+				? (payload?.exams.find((exam) => exam.id === normalizedItems?.[0]?.examId)?.title ?? "Planner Session")
 				: "Today's Planner Session";
 
 		try {
@@ -414,7 +414,7 @@ export default function PlannerPage() {
 											subject={exam.subject}
 											examDate={exam.examDate}
 											dateBadgeLabel={getExamDateBadge(exam.examDate)}
-											noteCount={exam.noteIds.length}
+											noteCount={Array.isArray(exam.noteIds) ? exam.noteIds.length : 0}
 											questionCount={exam.plannedQuestionCount}
 											onStudyToday={() => void startCombinedSession([{ examId: exam.id, questionCount: examTodaysQuestionCount }])}
 											onEdit={() => setExamDialogState({ mode: "edit", exam })}
@@ -460,7 +460,7 @@ export default function PlannerPage() {
 													subject={exam.subject}
 													examDate={exam.examDate}
 													dateBadgeLabel={getExamDateBadge(exam.examDate)}
-													noteCount={exam.noteIds.length}
+													noteCount={Array.isArray(exam.noteIds) ? exam.noteIds.length : 0}
 													questionCount={exam.plannedQuestionCount}
 													onStudyToday={() =>
 														void startCombinedSession([{ examId: exam.id, questionCount: examTodaysQuestionCount }])
@@ -485,7 +485,7 @@ export default function PlannerPage() {
 
 	return (
 		<div className="flex h-full min-h-0 min-w-0 w-full flex-1 overflow-hidden bg-[#0a0a0a]">
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-4 pt-4 sm:px-6 sm:pt-6">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-4 sm:px-6">
 				<HomeTopBar title="Planner" />
 				<div className="mx-auto flex min-h-0 w-full max-w-6xl flex-col gap-6 pb-16 pt-4 sm:pb-10 sm:pt-6">{mainContent}</div>
 			</div>

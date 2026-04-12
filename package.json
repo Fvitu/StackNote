@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
+    "postinstall": "node scripts/apply-oauth4webapi-patch.mjs",
     "lint": "eslint",
-    "backfill:search": "tsx scripts/backfill-note-search-data.ts"
+    "backfill:search": "tsx scripts/backfill-note-search-data.ts",
+    "icons:generate": "tsx scripts/generate-icons.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
@@ -38,6 +40,7 @@
     "emoji-picker-react": "^4.18.0",
     "geist": "^1.7.0",
     "groq-sdk": "^1.1.1",
+    "idb": "^8.0.3",
     "ioredis": "^5.10.1",
     "katex": "^0.16.38",
     "lucide-react": "^0.577.0",
@@ -50,6 +53,7 @@
     "react-dom": "19.2.3",
     "resend": "^6.9.3",
     "shadcn": "^4.0.7",
+    "sharp": "^0.34.5",
     "shiki": "^4.0.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
@@ -64,6 +68,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "playwright": "^1.59.1",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"

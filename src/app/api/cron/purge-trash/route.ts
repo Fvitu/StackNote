@@ -5,6 +5,7 @@ import { collectStoredFilePathsForNotes, deleteStoredObjects, getTrashCutoffDate
 
 const CRON_LOCK_KEY = "stacknote:cron:purge-trash";
 const CRON_LOCK_TTL_SECONDS = 60 * 10;
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
 function readBearerToken(request: NextRequest) {
 	const header = request.headers.get("authorization")?.trim() ?? "";
@@ -107,11 +108,18 @@ export async function GET(request: NextRequest) {
 			purgedFiles,
 		});
 
-		return NextResponse.json({
-			purgedNotes: purged.purgedNotes,
-			purgedFolders: purged.purgedFolders,
-			purgedFiles,
-		});
+		return NextResponse.json(
+			{
+				purgedNotes: purged.purgedNotes,
+				purgedFolders: purged.purgedFolders,
+				purgedFiles,
+			},
+			{
+				headers: {
+					"Cache-Control": MUTABLE_CACHE_CONTROL,
+				},
+			},
+		);
 	} catch (error) {
 		console.error("Failed to purge expired trash:", error);
 		return NextResponse.json({ error: "Failed to purge trash" }, { status: 500 });

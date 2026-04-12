@@ -25,7 +25,6 @@ import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu, SuggestionMenu 
 import { offset, shift, size } from "@floating-ui/react";
 import type { DefaultReactSuggestionItem } from "@blocknote/react";
 import { ImageIcon, FileText, Music, Video, Sigma, Code, Download, Sparkles, Smile } from "lucide-react";
-import { useDebouncedCallback } from "use-debounce";
 import { customBlockSpecs } from "@/components/editor/blocks";
 import { customInlineContentSpecs } from "@/components/editor/inline";
 import { EmojiPickerSkeleton } from "@/components/layout/AppShellSkeleton";
@@ -716,8 +715,33 @@ interface NoteEditorProps {
 	workspaceId: string;
 	noteId: string;
 	initialContent: unknown;
-	onSave: (noteId: string, content: unknown) => Promise<void>;
+	onSave: (noteId: string, content: unknown, changedBlockIds: string[]) => Promise<void>;
 	onContentChange?: (noteId: string, content: unknown) => void;
+}
+
+function collectBlockIds(content: unknown): string[] {
+	const seen = new Set<string>();
+
+	const visit = (value: unknown) => {
+		if (!Array.isArray(value)) {
+			return;
+		}
+
+		for (const item of value) {
+			if (!isPlainObject(item)) {
+				continue;
+			}
+
+			if (typeof item.id === "string" && item.id.length > 0) {
+				seen.add(item.id);
+			}
+
+			visit(item.children);
+		}
+	};
+
+	visit(normalizeBlockNoteContent(content));
+	return Array.from(seen);
 }
 
 export interface NoteEditorRef {
@@ -988,30 +1012,24 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 		[noteId],
 	);
 
-	const debouncedSave = useDebouncedCallback(async (content: unknown, targetNoteId: string) => {
-		await onSave(targetNoteId, content);
-	}, 1500);
-
 	useEffect(() => {
 		const handleCommit = () => {
 			const content = editor.document;
 			const contentSnapshot = serializeContentForAutosave(content);
 			if (contentSnapshot === lastAutosaveSnapshotRef.current) {
-				void debouncedSave.flush();
 				return;
 			}
 
 			lastAutosaveSnapshotRef.current = contentSnapshot;
 			onContentChange?.(noteId, content);
-			debouncedSave.cancel();
-			void onSave(noteId, content);
+			void onSave(noteId, content, collectBlockIds(content));
 		};
 
 		window.addEventListener("stacknote:commit-note-content", handleCommit);
 		return () => {
 			window.removeEventListener("stacknote:commit-note-content", handleCommit);
 		};
-	}, [debouncedSave, editor, noteId, onContentChange, onSave]);
+	}, [editor, noteId, onContentChange, onSave]);
 
 	const transformUrlBlockToEmbed = useCallback(
 		async (blockId: string) => {
@@ -1105,16 +1123,9 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 
 			lastAutosaveSnapshotRef.current = contentSnapshot;
 			onContentChange?.(noteId, content);
-			debouncedSave(content, noteId);
+			void onSave(noteId, content, collectBlockIds(content));
 		});
-	}, [debouncedSave, editor, noteId, onContentChange]);
-
-	useEffect(() => {
-		return () => {
-			void debouncedSave.flush();
-			debouncedSave.cancel();
-		};
-	}, [debouncedSave]);
+	}, [editor, noteId, onContentChange, onSave]);
 
 	useEffect(() => {
 		const rootElement = editor.domElement;

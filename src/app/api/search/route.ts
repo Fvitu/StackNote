@@ -19,7 +19,10 @@ const SEARCH_CONFIG = {
 	MAX_RESULTS: 10,
 	SNIPPET_MAX_WORDS: 30,
 	SNIPPET_MIN_WORDS: 15,
+	SNIPPET_START_SEL: "__STACKNOTE_HL_START__",
+	SNIPPET_STOP_SEL: "__STACKNOTE_HL_END__",
 } as const;
+const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
 function normalizeSearchText(value: string) {
 	return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
@@ -110,12 +113,20 @@ export async function GET(request: NextRequest) {
 				n."title",
 				n."folderId" AS "parentId",
 				n."updatedAt",
-				ts_headline(
-					'english',
-					COALESCE(n."title", '') || E'\n' || ${noteSearchableTextExpr},
-					query_input.ts_query,
-					${`MaxWords=${SEARCH_CONFIG.SNIPPET_MAX_WORDS}, MinWords=${SEARCH_CONFIG.SNIPPET_MIN_WORDS}, MaxFragments=2, StartSel=, StopSel=`}
-				) AS "snippet",
+					replace(
+						replace(
+							ts_headline(
+								'english',
+								COALESCE(n."title", '') || E'\n' || ${noteSearchableTextExpr},
+								query_input.ts_query,
+								${`MaxWords=${SEARCH_CONFIG.SNIPPET_MAX_WORDS}, MinWords=${SEARCH_CONFIG.SNIPPET_MIN_WORDS}, MaxFragments=2, StartSel=${SEARCH_CONFIG.SNIPPET_START_SEL}, StopSel=${SEARCH_CONFIG.SNIPPET_STOP_SEL}`}
+							),
+							${SEARCH_CONFIG.SNIPPET_START_SEL},
+							''
+						),
+						${SEARCH_CONFIG.SNIPPET_STOP_SEL},
+						''
+					) AS "snippet",
 				ts_rank_cd(
 					setweight(to_tsvector('english', lower(COALESCE(n."title", ''))), 'A') ||
 					setweight(to_tsvector('english', lower(${noteSearchableTextExpr})), 'B'),
@@ -148,5 +159,9 @@ export async function GET(request: NextRequest) {
 		results: rows.map((row) => mapSearchRow(row)),
 	};
 
-	return NextResponse.json(response);
+	return NextResponse.json(response, {
+		headers: {
+			"Cache-Control": MUTABLE_CACHE_CONTROL,
+		},
+	});
 }

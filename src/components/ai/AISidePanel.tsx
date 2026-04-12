@@ -428,7 +428,8 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 				}
 				if (requestId !== sessionLoadRequestIdRef.current) return;
 				const shouldPreserveOptimisticMessages = suppressSessionHydrationRef.current && sessionId === activeSessionIdRef.current;
-				const nextSelection = normalizeCachedSelection(data.session.contextNoteIds.length > 0 ? data.session.contextNoteIds : [noteId]);
+				const contextNoteIds = Array.isArray(data.session.contextNoteIds) ? data.session.contextNoteIds : [];
+				const nextSelection = normalizeCachedSelection(contextNoteIds.length > 0 ? contextNoteIds : [noteId]);
 				const inferredMode = inferContextSelectionMode(nextSelection, availableNotesRef.current, noteId);
 				const storedMode = readStoredContextSelectionMode(workspaceId, sessionId);
 				const nextMode = storedMode ? normalizeContextSelectionMode(storedMode, nextSelection, availableNotesRef.current, noteId) : inferredMode;
@@ -463,11 +464,12 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 				const data = await readJsonResponse<ChatSessionListResponse>(response);
 				if (!response.ok || !data) throw new Error(await readErrorMessage(response, "Failed to load chat sessions"));
 				if (ignore) return;
-				setSessions(data.sessions);
+				const sessions = data.sessions ?? [];
+				setSessions(sessions);
 				const storedSessionId = readStoredActiveSessionId(workspaceId);
-				const storedSession = storedSessionId ? data.sessions.find((session) => session.id === storedSessionId) : null;
-				const currentSession = activeSessionIdRef.current ? data.sessions.find((session) => session.id === activeSessionIdRef.current) : null;
-				const nextSessionId = currentSession?.id ?? storedSession?.id ?? data.sessions[0]?.id ?? null;
+				const storedSession = storedSessionId ? sessions.find((session) => session.id === storedSessionId) : null;
+				const currentSession = activeSessionIdRef.current ? sessions.find((session) => session.id === activeSessionIdRef.current) : null;
+				const nextSessionId = currentSession?.id ?? storedSession?.id ?? sessions[0]?.id ?? null;
 				if (nextSessionId) {
 					setActiveSessionId(nextSessionId);
 					writeStoredActiveSessionId(workspaceId, nextSessionId);

@@ -53,13 +53,13 @@ function getApiErrorMessage(value: unknown) {
 }
 
 function getTotalRemainingCards(queue: PlannerStudyQueueExam[]) {
-	return queue.reduce((sum, item) => sum + item.remainingCount + item.queuedCards.length, 0);
+	return queue.reduce((sum, item) => sum + item.remainingCount + (Array.isArray(item.queuedCards) ? item.queuedCards.length : 0), 0);
 }
 
 function shiftQueuedCard(queue: PlannerStudyQueueExam[]): PlannerStudyAdvancePayload {
 	for (let index = 0; index < queue.length; index += 1) {
 		const queueItem = queue[index];
-		if (!queueItem || queueItem.queuedCards.length === 0) {
+		if (!queueItem || !Array.isArray(queueItem.queuedCards) || queueItem.queuedCards.length === 0) {
 			continue;
 		}
 
