@@ -1,17 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronDown, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { QuizGame } from "@/components/ai/QuizGame";
 import { ExamCard } from "@/components/planner/ExamCard";
 import { NewExamDialog } from "@/components/planner/NewExamDialog";
 import { PlannerSkeleton } from "@/components/planner/PlannerSkeleton";
+import { PlannerStudySession } from "@/components/planner/PlannerStudySession";
 import { TodaysPlan } from "@/components/planner/TodaysPlan";
 import { HomeTopBar } from "@/components/home/HomeTopBar";
 import { Button } from "@/components/ui/button";
-import type { QuizQuestion } from "@/lib/quiz";
+import { isPlannerStudySessionPayload, type PlannerStudySessionPayload } from "@/lib/planner-study-session";
 
 interface NoteOption {
 	id: string;
@@ -44,6 +45,15 @@ interface PlannerPayload {
 	todaysPlan: TodaysPlanItem[];
 }
 
+type ExamDialogState =
+	| {
+			mode: "create";
+	  }
+	| {
+			mode: "edit";
+			exam: ExamRecord;
+	  };
+
 function isPlannerPayload(value: unknown): value is PlannerPayload {
 	if (!value || typeof value !== "object") {
 		return false;
@@ -62,46 +72,37 @@ function getApiErrorMessage(value: unknown) {
 	return typeof maybeError === "string" && maybeError.trim().length > 0 ? maybeError : null;
 }
 
-interface PlannerStudySessionPayload {
-	title: string;
-	questions: QuizQuestion[];
-}
-
-function isPlannerStudySessionPayload(value: unknown): value is PlannerStudySessionPayload {
+function getExamIdFromResponse(value: unknown) {
 	if (!value || typeof value !== "object") {
-		return false;
+		return null;
 	}
 
-	const candidate = value as Partial<PlannerStudySessionPayload>;
-	if (typeof candidate.title !== "string" || !Array.isArray(candidate.questions)) {
-		return false;
+	if ("exam" in value && value.exam && typeof value.exam === "object" && "id" in value.exam && typeof value.exam.id === "string") {
+		return value.exam.id;
 	}
 
-	return candidate.questions.every((question) => {
-		if (!question || typeof question !== "object") {
-			return false;
-		}
-
-		const candidateQuestion = question as Partial<QuizQuestion>;
-		return (
-			typeof candidateQuestion.id === "string" &&
-			typeof candidateQuestion.question === "string" &&
-			Array.isArray(candidateQuestion.options) &&
-			typeof candidateQuestion.correctOption === "string" &&
-			candidateQuestion.explanations !== null &&
-			typeof candidateQuestion.explanations === "object" &&
-			typeof candidateQuestion.difficulty === "string"
-		);
-	});
+	return null;
 }
 
-function daysUntil(examDate: string) {
+function dayOffsetFromToday(examDate: string) {
 	const examDateKey = examDate.slice(0, 10);
 	const target = new Date(`${examDateKey}T00:00:00.000Z`);
 	const now = new Date();
 	const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-	const diff = target.getTime() - today.getTime();
-	return Math.max(0, Math.ceil(diff / 86_400_000));
+	return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+}
+
+function getExamDateBadge(examDate: string) {
+	const offset = dayOffsetFromToday(examDate);
+	if (offset === 0) {
+		return "Today";
+	}
+
+	if (offset > 0) {
+		return `${offset}d`;
+	}
+
+	return `${Math.abs(offset)}d ago`;
 }
 
 export default function PlannerPage() {
@@ -109,10 +110,11 @@ export default function PlannerPage() {
 	const [isLoading, setIsLoading] = useState(true);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
-	const [isDialogOpen, setIsDialogOpen] = useState(false);
+	const [examDialogState, setExamDialogState] = useState<ExamDialogState | null>(null);
 	const [pendingDeletePlan, setPendingDeletePlan] = useState<{ examId: string; title: string } | null>(null);
 	const [isDeletingPlan, setIsDeletingPlan] = useState(false);
-	const [activeStudySession, setActiveStudySession] = useState<PlannerStudySessionPayload | null>(null);
+	const [studyOverlay, setStudyOverlay] = useState<{ title: string; session: PlannerStudySessionPayload | null } | null>(null);
+	const [isPastTestsOpen, setIsPastTestsOpen] = useState(false);
 
 	const refreshPlanner = useCallback(async () => {
 		setIsLoading(true);
@@ -143,36 +145,7 @@ export default function PlannerPage() {
 		void refreshPlanner();
 	}, [refreshPlanner]);
 
-	async function handleCreateExam(input: { title: string; subject?: string; examDate: string; noteIds: string[]; dailyStudyMinutes: number }) {
-		setActionError(null);
-
-		const createResponse = await fetch("/api/planner", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(input),
-		});
-		const createResponseBody = (await createResponse.json().catch(() => null)) as unknown;
-
-		if (!createResponse.ok) {
-			const apiErrorMessage = getApiErrorMessage(createResponseBody);
-			throw new Error(apiErrorMessage ?? "Failed to create exam");
-		}
-
-		const examId =
-			createResponseBody &&
-			typeof createResponseBody === "object" &&
-			"exam" in createResponseBody &&
-			createResponseBody.exam &&
-			typeof createResponseBody.exam === "object" &&
-			"id" in createResponseBody.exam &&
-			typeof createResponseBody.exam.id === "string"
-				? createResponseBody.exam.id
-				: null;
-
-		if (!examId) {
-			throw new Error("Planner returned an invalid exam response");
-		}
-
+	async function regenerateExamPlan(examId: string) {
 		const generateResponse = await fetch("/api/planner/generate", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
@@ -184,8 +157,61 @@ export default function PlannerPage() {
 			const apiErrorMessage = getApiErrorMessage(generateResponseBody);
 			throw new Error(apiErrorMessage ?? "Failed to generate study plan");
 		}
+	}
 
-		await refreshPlanner();
+	async function handleSubmitExam(input: { title: string; subject?: string | null; examDate: string; noteIds: string[]; dailyStudyMinutes: number }) {
+		setActionError(null);
+		const isEdit = examDialogState?.mode === "edit";
+
+		try {
+			if (isEdit) {
+				const updateResponse = await fetch("/api/planner", {
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						examId: examDialogState.exam.id,
+						...input,
+					}),
+				});
+				const updateResponseBody = (await updateResponse.json().catch(() => null)) as unknown;
+
+				if (!updateResponse.ok) {
+					const apiErrorMessage = getApiErrorMessage(updateResponseBody);
+					throw new Error(apiErrorMessage ?? "Failed to update exam");
+				}
+
+				await regenerateExamPlan(examDialogState.exam.id);
+				toast.success("Assessment updated");
+				await refreshPlanner();
+				return;
+			}
+
+			const createResponse = await fetch("/api/planner", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(input),
+			});
+			const createResponseBody = (await createResponse.json().catch(() => null)) as unknown;
+
+			if (!createResponse.ok) {
+				const apiErrorMessage = getApiErrorMessage(createResponseBody);
+				throw new Error(apiErrorMessage ?? "Failed to create exam");
+			}
+
+			const examId = getExamIdFromResponse(createResponseBody);
+			if (!examId) {
+				throw new Error("Planner returned an invalid exam response");
+			}
+
+			await regenerateExamPlan(examId);
+			toast.success("Assessment created");
+			await refreshPlanner();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : isEdit ? "Failed to update assessment" : "Failed to create assessment";
+			setActionError(message);
+			toast.error(message);
+			throw error;
+		}
 	}
 
 	async function handleDeletePlan(examId: string) {
@@ -205,9 +231,12 @@ export default function PlannerPage() {
 			}
 
 			setPendingDeletePlan(null);
+			toast.success("Assessment deleted");
 			await refreshPlanner();
 		} catch (error) {
-			setActionError(error instanceof Error ? error.message : "Failed to delete study plan");
+			const message = error instanceof Error ? error.message : "Failed to delete assessment";
+			setActionError(message);
+			toast.error(message);
 			console.error(error);
 		} finally {
 			setIsDeletingPlan(false);
@@ -223,12 +252,22 @@ export default function PlannerPage() {
 			.filter((item) => item.examId.length > 0 && item.questionCount > 0);
 
 		if (normalizedItems.length === 0) {
-			setActionError("There are no questions scheduled for this session yet.");
+			setActionError("There are no cards scheduled for this session yet.");
 			return;
 		}
 
+		const sessionTitle =
+			normalizedItems.length === 1
+				? (payload?.exams.find((exam) => exam.id === normalizedItems[0]?.examId)?.title ?? "Planner Session")
+				: "Today's Planner Session";
+
 		try {
 			setActionError(null);
+			setStudyOverlay({
+				title: sessionTitle,
+				session: null,
+			});
+
 			const response = await fetch("/api/planner/session/start", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -245,8 +284,12 @@ export default function PlannerPage() {
 				throw new Error("Study session returned an invalid payload");
 			}
 
-			setActiveStudySession(responseBody);
+			setStudyOverlay({
+				title: responseBody.title,
+				session: responseBody,
+			});
 		} catch (error) {
+			setStudyOverlay(null);
 			setActionError(error instanceof Error ? error.message : "Failed to start study session");
 			console.error(error);
 		}
@@ -263,6 +306,27 @@ export default function PlannerPage() {
 		examId: item.examId,
 		questionCount: item.questionCount,
 	}));
+
+	const { currentExams, pastExams } = useMemo(() => {
+		const nextCurrentExams: ExamRecord[] = [];
+		const nextPastExams: ExamRecord[] = [];
+
+		for (const exam of exams) {
+			if (dayOffsetFromToday(exam.examDate) < 0) {
+				nextPastExams.push(exam);
+				continue;
+			}
+
+			nextCurrentExams.push(exam);
+		}
+
+		nextPastExams.sort((left, right) => right.examDate.localeCompare(left.examDate));
+		return {
+			currentExams: nextCurrentExams,
+			pastExams: nextPastExams,
+		};
+	}, [exams]);
+
 	const mainContent =
 		isLoading && !payload ? (
 			<PlannerSkeleton />
@@ -293,7 +357,10 @@ export default function PlannerPage() {
 							Study Planner
 						</h1>
 					</div>
-					<Button type="button" onClick={() => setIsDialogOpen(true)} className="bg-[var(--sn-accent)] text-white hover:bg-[#8f7fff]">
+					<Button
+						type="button"
+						onClick={() => setExamDialogState({ mode: "create" })}
+						className="bg-[var(--sn-accent)] text-white hover:bg-[#8f7fff]">
 						+ New exam
 					</Button>
 				</div>
@@ -318,45 +385,97 @@ export default function PlannerPage() {
 					</div>
 				) : null}
 
-				{actionError ? (
-					<div className="rounded-2xl border px-4 py-3" style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
-						<p className="text-sm" style={{ color: "var(--text-primary)" }}>
-							{actionError}
-						</p>
-					</div>
-				) : null}
+				{/* actionError is shown via toast notifications; inline message removed */}
 
 				<div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]">
-					<div className="grid gap-4 md:grid-cols-2">
-						{exams.length === 0 ? (
-							<div className="rounded-[24px] border p-6" style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
-								<p className="text-base font-medium" style={{ color: "var(--text-primary)" }}>
-									No exams yet
-								</p>
-								<p className="mt-2 text-sm" style={{ color: "var(--text-secondary)" }}>
-									Add your first exam, link the notes you want to study, and StackNote will generate a question plan.
-								</p>
-							</div>
-						) : (
-							exams.map((exam) => {
-								const examTodaysQuestionCount = todaysQuestionCountByExamId.get(exam.id) ?? 0;
+					<div className="space-y-6">
+						<div className="grid gap-4 md:grid-cols-2">
+							{currentExams.length === 0 ? (
+								<div
+									className="rounded-[24px] border p-6"
+									style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
+									<p className="text-base font-medium" style={{ color: "var(--text-primary)" }}>
+										No upcoming exams
+									</p>
+									<p className="mt-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+										{pastExams.length > 0
+											? "Your older assessments are tucked away below. Add a new exam or update a past one to bring it back into the active plan."
+											: "Add your first exam, link the notes you want to study, and StackNote will generate a review plan."}
+									</p>
+								</div>
+							) : (
+								currentExams.map((exam) => {
+									const examTodaysQuestionCount = todaysQuestionCountByExamId.get(exam.id) ?? 0;
 
-								return (
-									<ExamCard
-										key={exam.id}
-										title={exam.title}
-										subject={exam.subject}
-										examDate={exam.examDate}
-										daysUntil={daysUntil(exam.examDate)}
-										noteCount={exam.noteIds.length}
-										questionCount={exam.plannedQuestionCount}
-										onStudyToday={() => void startCombinedSession([{ examId: exam.id, questionCount: examTodaysQuestionCount }])}
-										onDeletePlan={() => setPendingDeletePlan({ examId: exam.id, title: exam.title })}
-										isStudyTodayDisabled={examTodaysQuestionCount === 0}
-									/>
-								);
-							})
-						)}
+									return (
+										<ExamCard
+											key={exam.id}
+											title={exam.title}
+											subject={exam.subject}
+											examDate={exam.examDate}
+											dateBadgeLabel={getExamDateBadge(exam.examDate)}
+											noteCount={exam.noteIds.length}
+											questionCount={exam.plannedQuestionCount}
+											onStudyToday={() => void startCombinedSession([{ examId: exam.id, questionCount: examTodaysQuestionCount }])}
+											onEdit={() => setExamDialogState({ mode: "edit", exam })}
+											onDeletePlan={() => setPendingDeletePlan({ examId: exam.id, title: exam.title })}
+											isStudyTodayDisabled={examTodaysQuestionCount === 0}
+										/>
+									);
+								})
+							)}
+						</div>
+
+						{pastExams.length > 0 ? (
+							<section
+								className="rounded-[24px] border p-4 sm:p-6"
+								style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
+								<button
+									type="button"
+									onClick={() => setIsPastTestsOpen((current) => !current)}
+									className="flex w-full items-center justify-between gap-4 text-left">
+									<div>
+										<h2 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
+											Past tests
+										</h2>
+										<p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>
+											Assessments older than today stay folded here so the active plan remains focused.
+										</p>
+									</div>
+									<div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+										<span>{pastExams.length}</span>
+										<ChevronDown className={`h-4 w-4 transition-transform ${isPastTestsOpen ? "rotate-180" : ""}`} />
+									</div>
+								</button>
+
+								{isPastTestsOpen ? (
+									<div className="mt-4 grid gap-4 md:grid-cols-2">
+										{pastExams.map((exam) => {
+											const examTodaysQuestionCount = todaysQuestionCountByExamId.get(exam.id) ?? 0;
+
+											return (
+												<ExamCard
+													key={exam.id}
+													title={exam.title}
+													subject={exam.subject}
+													examDate={exam.examDate}
+													dateBadgeLabel={getExamDateBadge(exam.examDate)}
+													noteCount={exam.noteIds.length}
+													questionCount={exam.plannedQuestionCount}
+													onStudyToday={() =>
+														void startCombinedSession([{ examId: exam.id, questionCount: examTodaysQuestionCount }])
+													}
+													onEdit={() => setExamDialogState({ mode: "edit", exam })}
+													onDeletePlan={() => setPendingDeletePlan({ examId: exam.id, title: exam.title })}
+													isStudyTodayDisabled={examTodaysQuestionCount === 0}
+													variant="past"
+												/>
+											);
+										})}
+									</div>
+								) : null}
+							</section>
+						) : null}
 					</div>
 
 					<TodaysPlan items={todaysPlan} onStart={() => void startCombinedSession(todaysSessionItems)} />
@@ -371,7 +490,14 @@ export default function PlannerPage() {
 				<div className="mx-auto flex min-h-0 w-full max-w-6xl flex-col gap-6 pb-16 pt-4 sm:pb-10 sm:pt-6">{mainContent}</div>
 			</div>
 
-			<NewExamDialog open={isDialogOpen} notes={payload?.notes ?? []} onClose={() => setIsDialogOpen(false)} onCreate={handleCreateExam} />
+			<NewExamDialog
+				open={examDialogState !== null}
+				mode={examDialogState?.mode ?? "create"}
+				initialExam={examDialogState?.mode === "edit" ? examDialogState.exam : null}
+				notes={payload?.notes ?? []}
+				onClose={() => setExamDialogState(null)}
+				onSubmit={handleSubmitExam}
+			/>
 
 			<Dialog
 				open={Boolean(pendingDeletePlan)}
@@ -423,17 +549,17 @@ export default function PlannerPage() {
 				</DialogContent>
 			</Dialog>
 
-			{activeStudySession ? (
-				<div className="fixed inset-0 z-[140] bg-[rgba(6,6,8,0.96)] backdrop-blur-md">
-					<QuizGame
-						title={activeStudySession.title}
-						questions={activeStudySession.questions}
-						onExit={() => {
-							setActiveStudySession(null);
-							void refreshPlanner();
-						}}
-					/>
-				</div>
+			{studyOverlay ? (
+				<PlannerStudySession
+					open
+					loading={studyOverlay.session === null}
+					title={studyOverlay.title}
+					session={studyOverlay.session}
+					onClose={() => {
+						setStudyOverlay(null);
+						void refreshPlanner();
+					}}
+				/>
 			) : null}
 		</div>
 	);

@@ -20,8 +20,8 @@ function serializeCoverMeta(meta: NoteCoverMeta | null): Prisma.InputJsonValue |
 }
 
 async function getAuthorizedNote(noteId: string, userId: string) {
-	const note = await prisma.note.findUnique({
-		where: { id: noteId },
+	const note = await prisma.note.findFirst({
+		where: { id: noteId, deletedAt: null },
 		include: {
 			workspace: {
 				select: {

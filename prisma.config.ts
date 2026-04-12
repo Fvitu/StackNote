@@ -3,12 +3,21 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+function getEnvValue(value: string | undefined): string | undefined {
+	if (!value) {
+		return undefined;
+	}
+
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export default defineConfig({
-  schema: "prisma/schema.prisma",
-  migrations: {
-    path: "prisma/migrations",
-  },
-  datasource: {
-    url: process.env["DATABASE_URL"],
-  },
+	schema: "prisma/schema.prisma",
+	migrations: {
+		path: "prisma/migrations",
+	},
+	datasource: {
+		url: getEnvValue(process.env["DIRECT_URL"]) ?? getEnvValue(process.env["DATABASE_URL"]),
+	},
 });

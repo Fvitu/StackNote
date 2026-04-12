@@ -194,7 +194,7 @@ export default async function AppPage({ searchParams }: { searchParams: Promise<
 
 	const [folders, notes, aiUsage, settings, recentNotes, exams, todaysPlan] = await Promise.all([
 		prisma.folder.findMany({
-			where: { workspaceId: workspace.id },
+			where: { workspaceId: workspace.id, deletedAt: null },
 			orderBy: [{ order: "asc" }, { updatedAt: "desc" }],
 			select: {
 				id: true,
@@ -208,6 +208,7 @@ export default async function AppPage({ searchParams }: { searchParams: Promise<
 			where: {
 				workspaceId: workspace.id,
 				isArchived: false,
+				deletedAt: null,
 			},
 			orderBy: [{ order: "asc" }, { updatedAt: "desc" }],
 			select: {
@@ -237,14 +238,13 @@ export default async function AppPage({ searchParams }: { searchParams: Promise<
 		prisma.note.findMany({
 			where: {
 				isArchived: false,
-				workspace: {
-					userId,
-				},
+				workspaceId: workspace.id,
+				deletedAt: null,
 			},
 			orderBy: {
 				updatedAt: "desc",
 			},
-			take: 6,
+			take: 10,
 			select: {
 				id: true,
 				title: true,

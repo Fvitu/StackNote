@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
 	const notes = await prisma.note.findMany({
 		where: {
 			isArchived: false,
+			deletedAt: null,
 			workspace: {
 				userId: session.user.id,
 			},

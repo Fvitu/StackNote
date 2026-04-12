@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Search, X, FileText } from "lucide-react";
+import { toast } from "sonner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { SearchResponse, SearchResult } from "@/types/search";
 
 interface SearchModalProps {
@@ -29,7 +31,6 @@ export function SearchModal({ workspaceId, open, onClose, onSelectNote }: Search
 	const [loading, setLoading] = useState(false);
 	const [results, setResults] = useState<SearchResult[]>([]);
 	const [activeIndex, setActiveIndex] = useState(0);
-	const [mode, setMode] = useState<"recent" | "search">("recent");
 	const [requestError, setRequestError] = useState<string | null>(null);
 
 	const debouncedQuery = useDebounced(query, 300);
@@ -45,27 +46,34 @@ export function SearchModal({ workspaceId, open, onClose, onSelectNote }: Search
 		if (!open) return;
 		let cancelled = false;
 
+		if (!debouncedQuery.trim()) {
+			setLoading(false);
+			setRequestError(null);
+			setResults([]);
+			setActiveIndex(0);
+			return;
+		}
+
 		const run = async () => {
 			setLoading(true);
 			setRequestError(null);
 			try {
-				const response = await fetch(`/api/search?workspaceId=${workspaceId}&q=${encodeURIComponent(debouncedQuery)}`);
+				const response = await fetch(`/api/search?workspaceId=${workspaceId}&query=${encodeURIComponent(debouncedQuery)}`);
 				if (!response.ok) {
 					throw new Error(`Search request failed with status ${response.status}`);
 				}
 				const data = (await response.json()) as SearchResponse;
 				if (!cancelled) {
 					setResults(data.results ?? []);
-					setMode(data.mode);
 					setActiveIndex(0);
 				}
 			} catch (error) {
 				console.error("[search-modal] search request failed", error);
 				if (!cancelled) {
 					setResults([]);
-					setMode("search");
 					setActiveIndex(0);
 					setRequestError("Search is temporarily unavailable. Please try again.");
+					toast.error("Search unavailable. Try again shortly.");
 				}
 			} finally {
 				if (!cancelled) setLoading(false);
@@ -116,28 +124,9 @@ export function SearchModal({ workspaceId, open, onClose, onSelectNote }: Search
 	const emptyState = useMemo(() => {
 		if (loading) return "Searching...";
 		if (requestError) return requestError;
-		if (!debouncedQuery.trim()) return "No recent notes";
+		if (!debouncedQuery.trim()) return "Start typing to search your notes";
 		return `No notes found for "${debouncedQuery}"`;
 	}, [debouncedQuery, loading, requestError]);
-
-	const getMatchLabel = (matchType: SearchResult["matchType"]) => {
-		if (matchType === "hybrid") return "Strong match";
-		if (matchType === "semantic") return "Related";
-		return "Exact match";
-	};
-
-	const getMatchBadgeClassName = (matchType: SearchResult["matchType"] | undefined) => {
-		if (matchType === "hybrid") {
-			return "bg-emerald-500/10 text-emerald-400";
-		}
-		if (matchType === "semantic") {
-			return "bg-violet-500/10 text-[#7c6aff]";
-		}
-		if (matchType === "fulltext") {
-			return "bg-blue-500/10 text-blue-400";
-		}
-		return null;
-	};
 
 	if (!open) return null;
 
@@ -164,9 +153,18 @@ export function SearchModal({ workspaceId, open, onClose, onSelectNote }: Search
 						className="flex-1 bg-transparent text-sm outline-none"
 						style={{ color: "var(--text-primary)" }}
 					/>
-					<button onClick={onClose} className="rounded-[var(--sn-radius-sm)] p-1" style={{ color: "var(--text-tertiary)" }}>
-						<X className="h-4 w-4" />
-					</button>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								onClick={onClose}
+								className="rounded-[var(--sn-radius-sm)] p-1"
+								style={{ color: "var(--text-tertiary)" }}
+								aria-label="Close">
+								<X className="h-4 w-4" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>Close</TooltipContent>
+					</Tooltip>
 				</div>
 
 				<div className="max-h-[calc(70vh-80px)] overflow-y-auto py-1">
@@ -197,7 +195,7 @@ export function SearchModal({ workspaceId, open, onClose, onSelectNote }: Search
 					) : (
 						<>
 							<div className="px-4 py-1 text-[11px] uppercase tracking-wide" style={{ color: "var(--text-tertiary)" }}>
-								{mode === "recent" ? "Recent" : "Results"}
+								Results
 							</div>
 							{results.map((result, index) => {
 								const active = index === activeIndex;
@@ -213,29 +211,17 @@ export function SearchModal({ workspaceId, open, onClose, onSelectNote }: Search
 											onClose();
 										}}>
 										<div className="flex items-start gap-2">
-											{result.emoji ? (
-												<span className="mt-0.5 text-sm">{result.emoji}</span>
-											) : (
-												<FileText className="mt-0.5 h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-											)}
+											<FileText className="mt-0.5 h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
 											<div className="min-w-0 flex-1">
 												<div className="flex items-center gap-2">
 													<p className="truncate text-sm" style={{ color: "var(--text-primary)" }}>
 														{result.title || "Untitled"}
 													</p>
-													{mode === "search" && result.matchType ? (
-														<span
-															className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${getMatchBadgeClassName(result.matchType) ?? ""}`}>
-															{getMatchLabel(result.matchType)}
-														</span>
-													) : null}
 												</div>
 												{result.snippet ? (
-													<p
-														className="mt-1 line-clamp-2 text-xs [&_mark]:bg-transparent [&_mark]:font-medium [&_mark]:text-[#7c6aff]"
-														style={{ color: "var(--text-secondary)" }}
-														dangerouslySetInnerHTML={{ __html: result.snippet }}
-													/>
+													<p className="mt-1 line-clamp-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+														{result.snippet}
+													</p>
 												) : null}
 											</div>
 										</div>

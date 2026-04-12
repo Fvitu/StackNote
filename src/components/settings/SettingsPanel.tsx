@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Mic, Sparkles, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Check, ChevronDown, Mic, Sparkles, X } from "lucide-react";
+import { toast } from "sonner";
 import { FLASHCARD_MODEL_LIMITS, QUIZ_MODEL_LIMITS, STT_MODEL_LIMITS, TEXT_MODEL_LIMITS, formatDurationSeconds } from "@/lib/ai-limits";
 import { subscribeToAiUsageChanges } from "@/lib/ai-usage-events";
 import { formatUsageResetCountdown } from "@/lib/ai-usage";
 import { readJsonResponse } from "@/lib/http";
 import { STT_MODELS, TEXT_MODELS } from "@/lib/groq-models";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface UsageStats {
 	textModels: UsageModelStats[];
@@ -45,8 +47,50 @@ interface SettingsPanelProps {
 	onClose?: () => void;
 }
 
+interface ModelOption {
+	id: string;
+	name: string;
+	default?: boolean;
+}
+
 function metricPercentage(metric: CounterStat) {
 	return metric.limit > 0 ? (metric.used / metric.limit) * 100 : 0;
+}
+
+function UsageSkeleton() {
+	return (
+		<div className="space-y-4" aria-hidden="true">
+			{["Text Models", "Study Templates", "Voice Models"].map((title) => (
+				<div
+					key={title}
+					className="rounded-lg border p-4 animate-pulse"
+					style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
+					<div className="mb-3 h-4 w-24 rounded bg-[rgba(255,255,255,0.08)]" />
+					<div className="space-y-3">
+						<div className="rounded-md border p-3" style={{ borderColor: "var(--border-default)" }}>
+							<div className="mb-3 flex items-start justify-between gap-3">
+								<div className="min-w-0 flex-1 space-y-2">
+									<div className="h-4 w-32 rounded bg-[rgba(255,255,255,0.08)]" />
+									<div className="h-3 w-48 rounded bg-[rgba(255,255,255,0.06)]" />
+								</div>
+								<div className="w-28 space-y-2 text-right">
+									<div className="ml-auto h-3 w-full rounded bg-[rgba(255,255,255,0.08)]" />
+									<div className="ml-auto h-3 w-4/5 rounded bg-[rgba(255,255,255,0.08)]" />
+									<div className="ml-auto h-3 w-3/4 rounded bg-[rgba(255,255,255,0.08)]" />
+								</div>
+							</div>
+
+							<div className="space-y-2">
+								<div className="h-5 rounded-full bg-[rgba(255,255,255,0.06)]" />
+								<div className="h-5 w-11/12 rounded-full bg-[rgba(255,255,255,0.06)]" />
+								<div className="h-5 w-10/12 rounded-full bg-[rgba(255,255,255,0.06)]" />
+							</div>
+						</div>
+					</div>
+				</div>
+			))}
+		</div>
+	);
 }
 
 function SettingsHeader({ variant, onClose }: SettingsPanelProps) {
@@ -63,15 +107,123 @@ function SettingsHeader({ variant, onClose }: SettingsPanelProps) {
 	}
 
 	return (
-		<button
-			type="button"
-			onClick={onClose}
-			className="flex items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors hover:bg-[#1a1a1a]"
-			style={{ color: "var(--text-secondary)" }}
-			aria-label="Close settings">
-			<X className="h-4 w-4" />
-			Close
-		</button>
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<button
+					type="button"
+					onClick={onClose}
+					className="flex items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors hover:bg-[#1a1a1a]"
+					style={{ color: "var(--text-secondary)" }}
+					aria-label="Close">
+					<X className="h-4 w-4" />
+					Close
+				</button>
+			</TooltipTrigger>
+			<TooltipContent>Close</TooltipContent>
+		</Tooltip>
+	);
+}
+
+function ModelDropdown({
+	options,
+	value,
+	onChange,
+	disabled,
+	placeholder,
+}: {
+	options: readonly ModelOption[];
+	value: string;
+	onChange: (value: string) => void;
+	disabled?: boolean;
+	placeholder?: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const containerRef = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		if (!open) {
+			return;
+		}
+
+		const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+			if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+				setOpen(false);
+			}
+		};
+
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setOpen(false);
+			}
+		};
+
+		document.addEventListener("mousedown", handleOutsideClick);
+		document.addEventListener("touchstart", handleOutsideClick);
+		document.addEventListener("keydown", handleEscape);
+
+		return () => {
+			document.removeEventListener("mousedown", handleOutsideClick);
+			document.removeEventListener("touchstart", handleOutsideClick);
+			document.removeEventListener("keydown", handleEscape);
+		};
+	}, [open]);
+
+	const selectedOption = options.find((option) => option.id === value);
+
+	return (
+		<div ref={containerRef} className="relative">
+			<button
+				type="button"
+				onClick={() => setOpen((prev) => !prev)}
+				disabled={disabled}
+				aria-haspopup="listbox"
+				aria-expanded={open}
+				className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition focus:outline-none focus:ring-1 disabled:cursor-not-allowed disabled:opacity-50"
+				style={{
+					borderColor: "var(--border-default)",
+					color: "var(--text-primary)",
+					backgroundColor: "var(--bg-surface)",
+				}}>
+				<span className="truncate">{selectedOption ? `${selectedOption.name}${selectedOption.default ? " (Default)" : ""}` : placeholder}</span>
+				<ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} style={{ color: "var(--text-secondary)" }} />
+			</button>
+
+			{open ? (
+				<div
+					role="listbox"
+					className="absolute z-30 mt-2 w-full overflow-hidden rounded-md border shadow-lg"
+					style={{
+						borderColor: "var(--border-default)",
+						backgroundColor: "var(--bg-surface)",
+					}}>
+					<div className="max-h-56 overflow-y-auto py-1">
+						{options.map((option) => {
+							const isSelected = option.id === value;
+							return (
+								<button
+									key={option.id}
+									type="button"
+									role="option"
+									aria-selected={isSelected}
+									onClick={() => {
+										setOpen(false);
+										if (!isSelected) {
+											onChange(option.id);
+										}
+									}}
+									className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition hover:bg-[rgba(255,255,255,0.05)]"
+									style={{ color: "var(--text-primary)" }}>
+									<span className="min-w-0 truncate">
+										{option.name} {option.default ? "(Default)" : ""}
+									</span>
+									{isSelected ? <Check className="h-4 w-4 shrink-0" style={{ color: "var(--sn-accent)" }} /> : null}
+								</button>
+							);
+						})}
+					</div>
+				</div>
+			) : null}
+		</div>
 	);
 }
 
@@ -154,9 +306,18 @@ export function SettingsPanel({ variant, onClose }: SettingsPanelProps) {
 			});
 			if (response.ok) {
 				setSettings((prev) => ({ ...prev, [field]: value }));
+				if (field === "preferredTextModel") {
+					const selectedModel = TEXT_MODELS.find((model) => model.id === value)?.name ?? value;
+					toast.success(`Model updated to ${selectedModel}`);
+				} else {
+					toast.success("Settings saved");
+				}
+			} else {
+				toast.error("Failed to save settings");
 			}
 		} catch (error) {
 			console.error("Failed to save settings:", error);
+			toast.error("Failed to save settings");
 		} finally {
 			setSaving(false);
 		}
@@ -236,18 +397,13 @@ export function SettingsPanel({ variant, onClose }: SettingsPanelProps) {
 						<p className="mb-3 text-xs" style={{ color: "var(--text-tertiary)" }}>
 							The AI model used for chat and text generation
 						</p>
-						<select
+						<ModelDropdown
+							options={TEXT_MODELS}
 							value={settings.preferredTextModel}
-							onChange={(e) => handleSave("preferredTextModel", e.target.value)}
+							onChange={(value) => handleSave("preferredTextModel", value)}
 							disabled={loadingSettings || saving}
-							className="w-full rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 disabled:opacity-50"
-							style={{ borderColor: "var(--border-default)", color: "var(--text-primary)" }}>
-							{TEXT_MODELS.map((model) => (
-								<option key={model.id} value={model.id} style={{ backgroundColor: "var(--bg-surface)" }}>
-									{model.name} {model.default ? "(Default)" : ""}
-								</option>
-							))}
-						</select>
+							placeholder="Choose a text model"
+						/>
 						<p className="mt-2 text-xs" style={{ color: "var(--text-tertiary)" }}>
 							{TEXT_MODELS.find((model) => model.id === settings.preferredTextModel)?.description}
 						</p>
@@ -261,18 +417,13 @@ export function SettingsPanel({ variant, onClose }: SettingsPanelProps) {
 						<p className="mb-3 text-xs" style={{ color: "var(--text-tertiary)" }}>
 							Audio transcription uses your selected Whisper model
 						</p>
-						<select
+						<ModelDropdown
+							options={STT_MODELS}
 							value={settings.preferredSttModel}
-							onChange={(e) => handleSave("preferredSttModel", e.target.value)}
+							onChange={(value) => handleSave("preferredSttModel", value)}
 							disabled={loadingSettings || saving}
-							className="w-full rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 disabled:opacity-50"
-							style={{ borderColor: "var(--border-default)", color: "var(--text-primary)" }}>
-							{STT_MODELS.map((model) => (
-								<option key={model.id} value={model.id} style={{ backgroundColor: "var(--bg-surface)" }}>
-									{model.name} {model.default ? "(Default)" : ""}
-								</option>
-							))}
-						</select>
+							placeholder="Choose a transcription model"
+						/>
 						<p className="mt-2 text-xs" style={{ color: "var(--text-tertiary)" }}>
 							{STT_MODELS.find((model) => model.id === settings.preferredSttModel)?.description}
 						</p>
@@ -285,9 +436,7 @@ export function SettingsPanel({ variant, onClose }: SettingsPanelProps) {
 					</h2>
 
 					{loadingUsage ? (
-						<p className="text-sm" style={{ color: "var(--text-tertiary)" }}>
-							Loading usage stats...
-						</p>
+						<UsageSkeleton />
 					) : usage ? (
 						<div className="space-y-4">
 							{[

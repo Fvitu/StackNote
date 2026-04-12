@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Trash2 } from "lucide-react";
+import { CalendarDays, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -8,12 +8,14 @@ interface ExamCardProps {
 	title: string;
 	subject?: string | null;
 	examDate: string;
-	daysUntil: number;
+	dateBadgeLabel: string;
 	noteCount: number;
 	questionCount: number;
 	onStudyToday: () => void;
+	onEdit: () => void;
 	onDeletePlan: () => void;
 	isStudyTodayDisabled?: boolean;
+	variant?: "default" | "past";
 }
 
 function formatExamDate(dateValue: string) {
@@ -29,12 +31,26 @@ function formatExamDate(dateValue: string) {
 	return new Date(year, month - 1, day).toLocaleDateString();
 }
 
-export function ExamCard({ title, subject, examDate, daysUntil, noteCount, questionCount, onStudyToday, onDeletePlan, isStudyTodayDisabled = false }: ExamCardProps) {
-	const label = daysUntil <= 0 ? "Today" : `${daysUntil}d`;
+export function ExamCard({
+	title,
+	subject,
+	examDate,
+	dateBadgeLabel,
+	noteCount,
+	questionCount,
+	onStudyToday,
+	onEdit,
+	onDeletePlan,
+	isStudyTodayDisabled = false,
+	variant = "default",
+}: ExamCardProps) {
+	const isPast = variant === "past";
 
 	return (
-		<div className="rounded-[24px] border p-4 sm:p-5" style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
-			<div className="relative flex flex-col gap-3 pr-10 sm:flex-row sm:items-start sm:justify-between sm:pr-0">
+		<div
+			className={`rounded-[24px] border p-4 sm:p-5 ${isPast ? "opacity-90" : ""}`}
+			style={{ backgroundColor: "var(--bg-surface)", borderColor: "var(--border-default)" }}>
+			<div className="relative flex flex-col gap-3 pr-0 sm:pr-20">
 				<div className="min-w-0">
 					<p className="truncate text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
 						{title}
@@ -45,20 +61,34 @@ export function ExamCard({ title, subject, examDate, daysUntil, noteCount, quest
 						</p>
 					) : null}
 				</div>
-				<button
-					type="button"
-					onClick={onDeletePlan}
-					className="absolute right-0 top-0 rounded-full p-2 transition-colors hover:bg-[var(--bg-hover)] sm:static sm:self-auto"
-					aria-label={`Delete evaluation plan for ${title}`}>
-					<Trash2 className="h-4 w-4" style={{ color: "var(--text-secondary)" }} />
-				</button>
+				<div className="absolute right-3 top-3 flex items-center gap-1">
+					<button
+						type="button"
+						onClick={onEdit}
+						className="rounded-full p-2 transition-colors hover:bg-[var(--bg-hover)]"
+						aria-label={`Edit assessment ${title}`}>
+						<Pencil className="h-4 w-4" style={{ color: "var(--text-secondary)" }} />
+					</button>
+					<button
+						type="button"
+						onClick={onDeletePlan}
+						className="rounded-full p-2 transition-colors hover:bg-[var(--bg-hover)]"
+						aria-label={`Delete evaluation plan for ${title}`}>
+						<Trash2 className="h-4 w-4" style={{ color: "var(--destructive)" }} />
+					</button>
+				</div>
 			</div>
 
 			<div className="mt-4 flex flex-wrap items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
 				<CalendarDays className="h-4 w-4" />
 				<span>{formatExamDate(examDate)}</span>
-				<span className="rounded-full px-2 py-0.5 text-xs" style={{ backgroundColor: "var(--accent-muted)", color: "var(--sn-accent)" }}>
-					{label}
+				<span
+					className="rounded-full px-2 py-0.5 text-xs"
+					style={{
+						backgroundColor: isPast ? "rgba(255,255,255,0.08)" : "var(--accent-muted)",
+						color: isPast ? "var(--text-secondary)" : "var(--sn-accent)",
+					}}>
+					{dateBadgeLabel}
 				</span>
 			</div>
 

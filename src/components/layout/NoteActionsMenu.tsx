@@ -1,7 +1,8 @@
 "use client";
 
-import { Smile, Copy, Trash2, Pencil, FilePlus, FolderPlus, MoreHorizontal, Save, History as HistoryIcon } from "lucide-react";
+import { Smile, Copy, Trash2, Pencil, FilePlus, FolderPlus, MoreHorizontal, Save, History as HistoryIcon, Hexagon } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface NoteActionsMenuProps {
 	type: "note" | "folder";
@@ -19,9 +20,16 @@ interface NoteActionsMenuProps {
 	onSaveVersion?: () => void;
 	saveVersionDisabled?: boolean;
 	saveVersionLabel?: string;
+	analysisItem?: {
+		label: string;
+		badge: React.ReactNode;
+		onClick: () => void;
+		disabled?: boolean;
+	};
 	onDelete?: () => void;
 	onNewNote?: () => void;
 	onNewFolder?: () => void;
+	newFolderDisabled?: boolean;
 }
 
 export function NoteActionsMenu({
@@ -29,7 +37,7 @@ export function NoteActionsMenu({
 	trigger,
 	triggerIcon = <MoreHorizontal className="h-3.5 w-3.5" />,
 	triggerClassName = "flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]",
-	contentClassName,
+	contentClassName = "min-w-[13rem] max-w-[min(92vw,22rem)]",
 	align = "end",
 	side = "bottom",
 	disabled = false,
@@ -40,22 +48,30 @@ export function NoteActionsMenu({
 	onSaveVersion,
 	saveVersionDisabled = false,
 	saveVersionLabel = "Save version",
+	analysisItem,
 	onDelete,
 	onNewNote,
 	onNewFolder,
+	newFolderDisabled = false,
 }: NoteActionsMenuProps) {
 	return (
 		<DropdownMenu>
 			{trigger ? (
 				<DropdownMenuTrigger render={trigger} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} />
 			) : (
-				<DropdownMenuTrigger
-					className={triggerClassName}
-					style={{ color: "var(--text-tertiary)" }}
-					onClick={(e) => e.stopPropagation()}
-					onPointerDown={(e) => e.stopPropagation()}>
-					{triggerIcon}
-				</DropdownMenuTrigger>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<DropdownMenuTrigger
+							className={triggerClassName}
+							style={{ color: "var(--text-tertiary)" }}
+							aria-label="More options"
+							onClick={(e) => e.stopPropagation()}
+							onPointerDown={(e) => e.stopPropagation()}>
+							{triggerIcon}
+						</DropdownMenuTrigger>
+					</TooltipTrigger>
+					<TooltipContent>More options</TooltipContent>
+				</Tooltip>
 			)}
 			<DropdownMenuContent align={align} side={side} className={contentClassName} onClick={(e) => e.stopPropagation()}>
 				{type === "note" && onChangeIcon && (
@@ -80,7 +96,7 @@ export function NoteActionsMenu({
 				)}
 
 				{type === "folder" && onNewFolder && (
-					<DropdownMenuItem onClick={onNewFolder} disabled={disabled}>
+					<DropdownMenuItem onClick={onNewFolder} disabled={disabled || newFolderDisabled}>
 						<FolderPlus className="h-3.5 w-3.5" />
 						New Folder
 					</DropdownMenuItem>
@@ -107,12 +123,28 @@ export function NoteActionsMenu({
 					</DropdownMenuItem>
 				)}
 
+				{type === "note" && analysisItem && (
+					<>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							onClick={analysisItem.onClick}
+							disabled={disabled || analysisItem.disabled}
+							className="min-w-0 items-start gap-2 py-2">
+							<Hexagon className="h-3.5 w-3.5" />
+							<div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2">
+								<span className="min-w-0 flex-1 text-sm leading-5">{analysisItem.label}</span>
+								{analysisItem.badge}
+							</div>
+						</DropdownMenuItem>
+					</>
+				)}
+
 				{onDelete && (
 					<>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem onClick={onDelete} variant="destructive" disabled={disabled}>
 							<Trash2 className="h-3.5 w-3.5" />
-							{type === "note" ? "Remove" : "Delete"}
+							Move to Trash
 						</DropdownMenuItem>
 					</>
 				)}

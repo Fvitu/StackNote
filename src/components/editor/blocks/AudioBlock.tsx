@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Play, Pause, Volume2, VolumeX, Sparkles, Loader2 } from "lucide-react";
 import { createReactBlockSpec, BlockContentWrapper } from "@blocknote/react";
+import { toast } from "sonner";
 import { UsageIndicator } from "@/components/ai/UsageIndicator";
 import { usePreviewMode } from "@/components/editor/blocks/PreviewModeContext";
 import { readErrorMessage, readJsonResponse } from "@/lib/http";
@@ -178,8 +179,10 @@ export const audioMediaBlockSpec = createReactBlockSpec(
 					});
 
 					notifyAiUsageChanged();
+					toast.success("Transcription complete");
 				} catch (error) {
 					setTranscriptionError(error instanceof Error ? error.message : "Transcription failed");
+					toast.error("Transcription failed. Please try again.");
 				} finally {
 					setIsTranscribing(false);
 				}

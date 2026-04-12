@@ -18,6 +18,7 @@ async function getAuthorizedNote(noteId: string, userId: string) {
 	const note = await prisma.note.findFirst({
 		where: {
 			id: noteId,
+			deletedAt: null,
 			workspace: {
 				userId,
 			},

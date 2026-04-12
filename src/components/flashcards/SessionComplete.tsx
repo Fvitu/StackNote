@@ -10,6 +10,8 @@ interface SessionCompleteProps {
 	averageIntervalDays: number;
 	onStudyAgain: () => void;
 	onBack: () => void;
+	backLabel?: string;
+	showStudyAgain?: boolean;
 }
 
 function formatDuration(totalSeconds: number) {
@@ -18,7 +20,17 @@ function formatDuration(totalSeconds: number) {
 	return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
-export function SessionComplete({ title, totalCards, correctCards, totalTime, averageIntervalDays, onStudyAgain, onBack }: SessionCompleteProps) {
+export function SessionComplete({
+	title,
+	totalCards,
+	correctCards,
+	totalTime,
+	averageIntervalDays,
+	onStudyAgain,
+	onBack,
+	backLabel = "Back to notes",
+	showStudyAgain = true,
+}: SessionCompleteProps) {
 	const accuracy = totalCards > 0 ? Math.round((correctCards / totalCards) * 100) : 0;
 
 	return (
@@ -66,15 +78,17 @@ export function SessionComplete({ title, totalCards, correctCards, totalTime, av
 			</div>
 
 			<div className="mt-6 flex w-full flex-col gap-3 sm:mt-8 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
-				<Button
-					type="button"
-					variant="outline"
-					onClick={onStudyAgain}
-					className="w-full border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:w-auto">
-					Study again
-				</Button>
+				{showStudyAgain ? (
+					<Button
+						type="button"
+						variant="outline"
+						onClick={onStudyAgain}
+						className="w-full border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:w-auto">
+						Study again
+					</Button>
+				) : null}
 				<Button type="button" onClick={onBack} className="w-full bg-[var(--sn-accent)] text-white hover:bg-[#8f7fff] sm:w-auto">
-					Back to notes
+					{backLabel}
 				</Button>
 			</div>
 		</div>

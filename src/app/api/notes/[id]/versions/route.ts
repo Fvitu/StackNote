@@ -3,12 +3,12 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NOTE_VERSION_LIMIT } from "@/lib/note-versioning";
 import { autosaveNoteContent, createNoteVersion } from "@/lib/note-server";
-import { getNoteSchemaCapabilities } from "@/lib/note-schema";
 
 async function getAuthorizedNote(noteId: string, userId: string) {
 	const note = await prisma.note.findFirst({
 		where: {
 			id: noteId,
+			deletedAt: null,
 			workspace: {
 				userId,
 			},
@@ -80,14 +80,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 	if (typeof manual !== "boolean") {
 		return NextResponse.json({ error: "manual is required" }, { status: 400 });
 	}
-	const noteSchemaCapabilities = await getNoteSchemaCapabilities();
 
 	const result = await prisma.$transaction(async (tx) => {
 		const sourceContent = body?.content !== undefined ? body.content : (access.note.content ?? []);
 
 		const autosaved =
 			body?.content !== undefined
-				? await autosaveNoteContent(tx, id, sourceContent, noteSchemaCapabilities)
+				? await autosaveNoteContent(tx, id, sourceContent)
 				: {
 						updatedNote: access.note,
 						normalizedContent: sourceContent,

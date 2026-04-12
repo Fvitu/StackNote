@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BrainCircuit, ChevronLeft, CheckSquare, Layers, Plus, Search, Send, Square, Sparkles, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
 import { ChatMessage, type Message } from "./ChatMessage";
 import { ModelSelector } from "./ModelSelector";
 import { SuggestedPrompts } from "./SuggestedPrompts";
@@ -11,6 +12,7 @@ import { UsageIndicator } from "./UsageIndicator";
 import { AIPanelSkeleton } from "./AIPanelSkeleton";
 import type { FlashcardDeckPayload } from "@/components/flashcards/types";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DEFAULT_TEXT_MODEL, isValidTextModel, type TextModelId } from "@/lib/groq-models";
 import { noteContentToText } from "@/lib/ai/note-content";
 import { parseFlashcardDeckMessage } from "@/lib/flashcard-chat-message";
@@ -158,17 +160,29 @@ function isAllSelection(selectedIds: string[], availableNotes: ContextNoteOption
 	return availableNotes.every((note) => selectedSet.has(note.id));
 }
 
-function inferContextSelectionMode(
-	session: ChatSessionSummary,
+function inferContextSelectionMode(selectedIds: string[], availableNotes: ContextNoteOption[], currentNoteId: string): ContextSelectionMode {
+	if (isAllSelection(selectedIds, availableNotes)) return "all";
+	if (selectedIds.length === 1) {
+		const selectedId = selectedIds[0];
+		if (selectedId === currentNoteId) return "current";
+	}
+	return "manual";
+}
+
+function normalizeContextSelectionMode(
+	mode: ContextSelectionMode,
 	selectedIds: string[],
 	availableNotes: ContextNoteOption[],
 	currentNoteId: string,
 ): ContextSelectionMode {
-	if (isAllSelection(selectedIds, availableNotes)) return "all";
-	if (selectedIds.length === 1) {
-		const selectedId = selectedIds[0];
-		if (selectedId === currentNoteId || (session.noteId && selectedId === session.noteId)) return "current";
+	if (mode === "all") {
+		return isAllSelection(selectedIds, availableNotes) ? "all" : "manual";
 	}
+
+	if (mode === "current") {
+		return selectedIds.length === 1 && selectedIds[0] === currentNoteId ? "current" : "manual";
+	}
+
 	return "manual";
 }
 
@@ -359,7 +373,7 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 					throw new Error(await readErrorMessage(response, "Failed to create chat session"));
 				}
 				const nextSelection = normalizeCachedSelection(contextNoteIds);
-				const nextMode = inferContextSelectionMode(data.session, nextSelection, availableNotesRef.current, noteId);
+				const nextMode = inferContextSelectionMode(nextSelection, availableNotesRef.current, noteId);
 				hydrateSessionState(data.session, [], nextSelection, nextMode);
 				sessionStateCacheRef.current.set(data.session.id, {
 					session: data.session,
@@ -415,9 +429,9 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 				if (requestId !== sessionLoadRequestIdRef.current) return;
 				const shouldPreserveOptimisticMessages = suppressSessionHydrationRef.current && sessionId === activeSessionIdRef.current;
 				const nextSelection = normalizeCachedSelection(data.session.contextNoteIds.length > 0 ? data.session.contextNoteIds : [noteId]);
-				const nextMode =
-					readStoredContextSelectionMode(workspaceId, sessionId) ??
-					inferContextSelectionMode(data.session, nextSelection, availableNotesRef.current, noteId);
+				const inferredMode = inferContextSelectionMode(nextSelection, availableNotesRef.current, noteId);
+				const storedMode = readStoredContextSelectionMode(workspaceId, sessionId);
+				const nextMode = storedMode ? normalizeContextSelectionMode(storedMode, nextSelection, availableNotesRef.current, noteId) : inferredMode;
 				upsertSession(data.session);
 				sessionStateCacheRef.current.set(sessionId, {
 					session: data.session,
@@ -535,7 +549,20 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 
 	const defaultFlashcardSourceText = useMemo(() => noteContentToText(noteContent).trim(), [noteContent]);
 
-	const selectedCount = selectedNoteIds.length;
+	const effectiveContextNoteIds = useMemo(() => {
+		if (contextSelectionMode === "current") {
+			return [noteId];
+		}
+
+		if (contextSelectionMode === "all") {
+			const allNoteIds = availableNotes.map((note) => note.id);
+			return allNoteIds.length > 0 ? allNoteIds : [noteId];
+		}
+
+		return selectedNoteIds.length > 0 ? selectedNoteIds : [noteId];
+	}, [availableNotes, contextSelectionMode, noteId, selectedNoteIds]);
+
+	const selectedCount = effectiveContextNoteIds.length;
 	const activeSession = useMemo(() => sessions.find((session) => session.id === activeSessionId) ?? null, [activeSessionId, sessions]);
 	const isConversationLocked = isLoading || isSessionsLoading || isSessionLoading || isCreatingSession;
 	const isInitialSessionHydrationPending = useMemo(() => {
@@ -617,9 +644,9 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 	);
 
 	const handleCreateSession = useCallback(async () => {
-		await createSession(selectedNoteIds.length > 0 ? selectedNoteIds : [noteId], noteTitle);
+		await createSession(effectiveContextNoteIds, noteTitle);
 		setIsChatHistoryOpen(false);
-	}, [createSession, noteId, noteTitle, selectedNoteIds]);
+	}, [createSession, effectiveContextNoteIds, noteTitle]);
 
 	const handleRequestDeleteSession = useCallback((session: ChatSessionSummary) => {
 		setSessionPendingDeletion(session);
@@ -649,9 +676,11 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 				}
 			}
 			setSessionPendingDeletion(null);
+			toast.success("Conversation cleared");
 		} catch (deleteError) {
 			console.error("Failed to delete AI chat session:", deleteError);
 			setSessionsError(deleteError instanceof Error ? deleteError.message : "Failed to delete chat session");
+			toast.error("Action failed. Try again.");
 		} finally {
 			setIsDeletingSession(false);
 		}
@@ -678,35 +707,38 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 
 		try {
 			if (!activeSessionId) {
-				const createdSession = await createSession(selectedNoteIds.length > 0 ? selectedNoteIds : [noteId], noteTitle);
+				const createdSession = await createSession(effectiveContextNoteIds, noteTitle);
 				messagesSessionIdRef.current = createdSession.id;
 			}
 			setIsFlashcardDialogOpen(true);
 		} catch (sessionError) {
-			setError(sessionError instanceof Error ? sessionError.message : "Failed to prepare flashcard session");
+			setError("Action failed. Try again.");
+			toast.error("Action failed. Try again.");
 		}
-	}, [activeSessionId, createSession, isConversationLocked, noteId, noteTitle, selectedNoteIds]);
+	}, [activeSessionId, createSession, effectiveContextNoteIds, isConversationLocked, noteTitle]);
 
 	const handleOpenQuizDialog = useCallback(async () => {
 		if (isConversationLocked) return;
 
 		try {
 			if (!activeSessionId) {
-				const createdSession = await createSession(selectedNoteIds.length > 0 ? selectedNoteIds : [noteId], noteTitle);
+				const createdSession = await createSession(effectiveContextNoteIds, noteTitle);
 				messagesSessionIdRef.current = createdSession.id;
 			}
 
 			setQuizSelectionText(typeof window === "undefined" ? "" : (window.getSelection?.()?.toString().trim() ?? ""));
 			setIsQuizDialogOpen(true);
 		} catch (sessionError) {
-			setError(sessionError instanceof Error ? sessionError.message : "Failed to prepare quiz session");
+			setError("Action failed. Try again.");
+			toast.error("Action failed. Try again.");
 		}
-	}, [activeSessionId, createSession, isConversationLocked, noteId, noteTitle, selectedNoteIds]);
+	}, [activeSessionId, createSession, effectiveContextNoteIds, isConversationLocked, noteTitle]);
 
 	const handleQuizGenerated = useCallback(
 		(questions: QuizQuestion[]) => {
 			if (questions.length === 0) {
 				setError("Quiz generation did not return any questions");
+				toast.error("Action failed. Try again.");
 				return;
 			}
 
@@ -717,7 +749,9 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 
 			sessionStateCacheRef.current.delete(activeSessionId);
 			void loadSessionDetails(activeSessionId).catch((sessionError) => {
-				setError(sessionError instanceof Error ? sessionError.message : "Failed to refresh quiz history");
+				console.error("Failed to refresh quiz history", sessionError);
+				setError("Action failed. Try again.");
+				toast.error("Action failed. Try again.");
 			});
 		},
 		[activeSessionId, loadSessionDetails],
@@ -741,7 +775,7 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 			suppressSessionHydrationRef.current = true;
 			let sessionIdToUse = activeSessionId;
 			if (!sessionIdToUse) {
-				const createdSession = await createSession(selectedNoteIds.length > 0 ? selectedNoteIds : [noteId], noteTitle);
+				const createdSession = await createSession(effectiveContextNoteIds, noteTitle);
 				sessionIdToUse = createdSession.id;
 				messagesSessionIdRef.current = createdSession.id;
 			}
@@ -764,7 +798,7 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 						noteId,
 						noteTitle,
 						noteContent,
-						contextNoteIds: selectedNoteIds,
+						contextNoteIds: effectiveContextNoteIds,
 						model,
 						source: "chat",
 					}),
@@ -788,15 +822,16 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 				}
 				notifyAiUsageChanged();
 			} catch (submitError) {
-				const errorMessage = submitError instanceof Error ? submitError.message : "Something went wrong";
-				setError(errorMessage);
+				console.error("Failed to submit AI request", submitError);
+				setError("Sage is unavailable. Please try again.");
+				toast.error("Sage is unavailable. Please try again.");
 				setMessages((prev) => prev.filter((message) => message.id !== assistantId));
 			} finally {
 				suppressSessionHydrationRef.current = false;
 				setIsLoading(false);
 			}
 		},
-		[activeSessionId, createSession, input, isConversationLocked, model, noteContent, noteId, noteTitle, selectedNoteIds],
+		[activeSessionId, createSession, effectiveContextNoteIds, input, isConversationLocked, model, noteContent, noteId, noteTitle],
 	);
 
 	useEffect(() => {
@@ -859,9 +894,14 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 							style={{ color: "var(--text-secondary)" }}>
 							Close
 						</button>
-						<button onClick={() => onClose()} className="rounded p-1.5">
-							<X className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-						</button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<button onClick={() => onClose()} className="rounded p-1.5" aria-label="Close">
+									<X className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
+								</button>
+							</TooltipTrigger>
+							<TooltipContent>Close</TooltipContent>
+						</Tooltip>
 					</div>
 				</div>
 
@@ -1100,13 +1140,18 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 			<div className={`absolute inset-0 z-30 flex flex-col bg-[var(--bg-sidebar)] ${isChatHistoryOpen ? "pointer-events-auto" : "hidden"}`}>
 				<div className="flex h-12 shrink-0 items-center justify-between border-b px-3" style={{ borderColor: "var(--border-default)" }}>
 					<div className="flex min-w-0 items-center gap-2">
-						<button
-							type="button"
-							onClick={() => setIsChatHistoryOpen(false)}
-							className="rounded p-1.5 transition-colors hover:bg-[#1a1a1a]"
-							aria-label="Back to chat">
-							<ChevronLeft className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-						</button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<button
+									type="button"
+									onClick={() => setIsChatHistoryOpen(false)}
+									className="rounded p-1.5 transition-colors hover:bg-[#1a1a1a]"
+									aria-label="Back to chat">
+									<ChevronLeft className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
+								</button>
+							</TooltipTrigger>
+							<TooltipContent>Back to chat</TooltipContent>
+						</Tooltip>
 						<div className="min-w-0">
 							<p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
 								Chat history
@@ -1161,15 +1206,19 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 												</span>
 											</div>
 										</button>
-										<button
-											type="button"
-											onClick={() => handleRequestDeleteSession(session)}
-											disabled={isConversationLocked}
-											className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[#261a1a] disabled:cursor-not-allowed disabled:opacity-50"
-											title={`Delete ${session.title}`}
-											aria-label={`Delete ${session.title}`}>
-											<Trash2 className="h-3.5 w-3.5" style={{ color: "#f87171" }} />
-										</button>
+										<Tooltip>
+											<TooltipTrigger asChild>
+												<button
+													type="button"
+													onClick={() => handleRequestDeleteSession(session)}
+													disabled={isConversationLocked}
+													className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[#261a1a] disabled:cursor-not-allowed disabled:opacity-50"
+													aria-label="Clear conversation">
+													<Trash2 className="h-3.5 w-3.5" style={{ color: "#f87171" }} />
+												</button>
+											</TooltipTrigger>
+											<TooltipContent>Clear conversation</TooltipContent>
+										</Tooltip>
 									</div>
 								);
 							})}
@@ -1197,13 +1246,18 @@ export function AISidePanel({ workspaceId, noteId, noteTitle, noteContent, onApp
 								Select notes to shape the assistant context.
 							</p>
 						</div>
-						<button
-							type="button"
-							onClick={() => setIsNoteAccessOpen(false)}
-							className="rounded p-1.5 transition-colors hover:bg-[#1a1a1a]"
-							aria-label="Close note access panel">
-							<X className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-						</button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<button
+									type="button"
+									onClick={() => setIsNoteAccessOpen(false)}
+									className="rounded p-1.5 transition-colors hover:bg-[#1a1a1a]"
+									aria-label="Close">
+									<X className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
+								</button>
+							</TooltipTrigger>
+							<TooltipContent>Close</TooltipContent>
+						</Tooltip>
 					</div>
 				</div>
 				<div className="p-3">

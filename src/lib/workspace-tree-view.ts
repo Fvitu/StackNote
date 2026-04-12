@@ -224,6 +224,10 @@ export function applyWorkspaceTreeReorder(
 			return null;
 		}
 
+		if (dropTarget.kind === "folder" && dropTarget.mode === "inside") {
+			return null;
+		}
+
 		const nextParentId =
 			dropTarget.kind === "root"
 				? null

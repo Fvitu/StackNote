@@ -44,9 +44,7 @@ export function TodaysPlan({ items, onStart }: TodaysPlanProps) {
 						</div>
 					))
 				)}
-			</div>
-
-			<div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+			</div>			<div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<p className="text-sm" style={{ color: "var(--text-secondary)" }}>
 					Total: ~{totalMinutes} minutes
 				</p>

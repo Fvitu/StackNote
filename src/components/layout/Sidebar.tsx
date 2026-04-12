@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	DndContext,
 	MouseSensor,
@@ -20,25 +19,30 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FilePlus, FolderPlus, Search, Home, ChevronDown, LogOut, PanelLeftClose, CalendarDays, Settings } from "lucide-react";
+import { FilePlus, FolderPlus, Search, Home, ChevronDown, LogOut, PanelLeftClose, CalendarDays, Settings, Trash2 } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
+import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SidebarItem } from "./SidebarItem";
 import { NoteIconPickerDialog } from "./NoteIconPickerDialog";
 import { signOutAction } from "@/app/actions";
 import { fetchJson } from "@/lib/api-client";
 import { fetchNote } from "@/lib/note-client";
+import { buildFolderDepthMap, canCreateFolderUnderParent } from "@/lib/folder-depth";
 import { queryKeys } from "@/lib/query-keys";
 import { updateNoteInTree } from "@/lib/tree-helpers";
 import {
 	applyWorkspaceTreeReorder,
 	collectWorkspaceTreeEntries,
+	flattenWorkspaceFolders,
 	sortWorkspaceRootNotes,
 	type WorkspaceDraggableItem,
 	type WorkspaceDropTarget,
 	type WorkspaceReorderPayload,
 } from "@/lib/workspace-tree-view";
 import type { FolderTreeItem, NoteTreeItem, WorkspaceTree } from "@/types";
+import type { TrashListResponse } from "@/types/trash";
 
 type OptimisticResult = Promise<{ id: string } | null | void>;
 type AsyncResult = Promise<void | null>;
@@ -54,6 +58,7 @@ interface SidebarProps {
 	onRefresh: () => void;
 	onSearchOpen: () => void;
 	onSettingsOpen: () => void;
+	onTrashOpen: () => void;
 	onCreateNote?: (folderId?: string) => OptimisticResult;
 	onCreateFolder?: (parentId?: string) => OptimisticResult;
 	onDeleteNote?: (noteId: string) => AsyncResult;
@@ -65,6 +70,7 @@ interface SidebarProps {
 	onReorderTree?: (nextTree: WorkspaceTree, payload: WorkspaceReorderPayload) => AsyncResult;
 	onFolderVisited?: (folderId: string | null) => void;
 	isSettingsOpen?: boolean;
+	isTrashOpen?: boolean;
 }
 
 const ROOT_DROP_ID = "sidebar-root-drop-zone";
@@ -72,6 +78,7 @@ const DRAG_SCROLL_EDGE_PX = 48;
 const DRAG_SCROLL_STEP_PX = 24;
 const TREE_INDENT_PX = 12;
 const ROW_BASE_PADDING_PX = 8;
+const TRASH_LAST_SEEN_STORAGE_PREFIX = "stacknote:trash-last-seen:";
 
 function getGuideOffset(depth: number) {
 	return ROW_BASE_PADDING_PX + depth * TREE_INDENT_PX - 10;
@@ -167,7 +174,9 @@ export function Sidebar({
 	onRefresh,
 	onSearchOpen,
 	onSettingsOpen,
+	onTrashOpen,
 	isSettingsOpen = false,
+	isTrashOpen = false,
 	onCreateNote: onCreateNoteOptimistic,
 	onCreateFolder: onCreateFolderOptimistic,
 	onDeleteNote: onDeleteNoteOptimistic,
@@ -223,7 +232,78 @@ export function Sidebar({
 	const hasVisibleItems = visibleTree.folders.length > 0 || visibleTree.rootNotes.length > 0;
 	const treeEntries = useMemo(() => collectWorkspaceTreeEntries(tree), [tree]);
 	const treeEntryMap = useMemo(() => new Map(treeEntries.map((entry) => [entry.id, entry])), [treeEntries]);
+	const folderDepthById = useMemo(
+		() =>
+			buildFolderDepthMap(
+				flattenWorkspaceFolders(tree.folders).map((folder) => ({
+					id: folder.id,
+					parentId: folder.parentId ?? null,
+				})),
+			),
+		[tree.folders],
+	);
+	const canCreateFolderAtParent = useCallback((parentId: string | null) => canCreateFolderUnderParent(parentId, folderDepthById), [folderDepthById]);
 	const noteIconPickerNote = useMemo(() => (noteIconPickerId ? findNoteInTree(tree, noteIconPickerId) : null), [noteIconPickerId, tree]);
+	const trashStatusQuery = useQuery({
+		queryKey: queryKeys.trashStatus,
+		queryFn: () => fetchJson<TrashListResponse>("/api/trash?limit=1"),
+		staleTime: 30_000,
+	});
+	const hasTrashItems = (trashStatusQuery.data?.items.length ?? 0) > 0;
+	const latestTrashDeletedAt = trashStatusQuery.data?.items[0]?.deletedAt ?? null;
+	const [lastSeenTrashDeletedAt, setLastSeenTrashDeletedAt] = useState<string | null>(null);
+	const hasUnreadTrashItems = useMemo(() => {
+		if (!hasTrashItems || !latestTrashDeletedAt) {
+			return false;
+		}
+
+		if (!lastSeenTrashDeletedAt) {
+			return true;
+		}
+
+		const latestMs = Date.parse(latestTrashDeletedAt);
+		const seenMs = Date.parse(lastSeenTrashDeletedAt);
+		if (!Number.isFinite(latestMs) || !Number.isFinite(seenMs)) {
+			return latestTrashDeletedAt !== lastSeenTrashDeletedAt;
+		}
+
+		return latestMs > seenMs;
+	}, [hasTrashItems, lastSeenTrashDeletedAt, latestTrashDeletedAt]);
+
+	useEffect(() => {
+		if (typeof window === "undefined" || !workspaceId) {
+			return;
+		}
+
+		const stored = window.localStorage.getItem(`${TRASH_LAST_SEEN_STORAGE_PREFIX}${workspaceId}`);
+		setLastSeenTrashDeletedAt(stored);
+	}, [workspaceId]);
+
+	const markTrashAsSeen = useCallback(() => {
+		if (typeof window === "undefined" || !workspaceId) {
+			return;
+		}
+
+		const nextSeenValue = latestTrashDeletedAt ?? new Date().toISOString();
+		window.localStorage.setItem(`${TRASH_LAST_SEEN_STORAGE_PREFIX}${workspaceId}`, nextSeenValue);
+		setLastSeenTrashDeletedAt(nextSeenValue);
+	}, [latestTrashDeletedAt, workspaceId]);
+
+	const handleTrashOpen = useCallback(() => {
+		markTrashAsSeen();
+		onTrashOpen();
+	}, [markTrashAsSeen, onTrashOpen]);
+
+	const getFolderLabel = useCallback(
+		(folderId: string | null) => {
+			if (!folderId) {
+				return "Workspace";
+			}
+
+			return treeEntryMap.get(folderId)?.name ?? "Workspace";
+		},
+		[treeEntryMap],
+	);
 
 	const openNoteInWorkspace = useCallback(
 		(noteId: string, folderId: string | null) => {
@@ -272,6 +352,10 @@ export function Sidebar({
 
 	const handleCreateFolder = useCallback(
 		async (parentId?: string) => {
+			if (!canCreateFolderAtParent(parentId ?? null)) {
+				return;
+			}
+
 			if (onCreateFolderOptimistic) {
 				const folder = await onCreateFolderOptimistic(parentId);
 				if (folder) {
@@ -290,7 +374,7 @@ export function Sidebar({
 				}
 			}
 		},
-		[onCreateFolderOptimistic, onRefresh, workspaceId],
+		[canCreateFolderAtParent, onCreateFolderOptimistic, onRefresh, workspaceId],
 	);
 
 	const handleGoHome = useCallback(() => {
@@ -299,6 +383,11 @@ export function Sidebar({
 		router.push("/");
 		closeSidebarOnMobile();
 	}, [closeSidebarOnMobile, onFolderVisited, router, setActiveNote]);
+
+	const handleGoPlanner = useCallback(() => {
+		router.push("/planner");
+		closeSidebarOnMobile();
+	}, [closeSidebarOnMobile, router]);
 
 	const handleRename = useCallback(
 		async (id: string, type: "folder" | "note", newName: string) => {
@@ -327,6 +416,7 @@ export function Sidebar({
 				await onDeleteFolderOptimistic(id);
 			} else if (type === "note" && onDeleteNoteOptimistic) {
 				await onDeleteNoteOptimistic(id);
+				await queryClient.invalidateQueries({ queryKey: queryKeys.trashStatus });
 				if (state.activeNoteId === id) {
 					setActiveNote(null);
 					router.push("/");
@@ -334,6 +424,7 @@ export function Sidebar({
 			} else {
 				const endpoint = type === "folder" ? `/api/folders/${id}` : `/api/notes/${id}`;
 				await fetch(endpoint, { method: "DELETE" });
+				await queryClient.invalidateQueries({ queryKey: queryKeys.trashStatus });
 				if (state.activeNoteId === id) {
 					setActiveNote(null);
 					router.push("/");
@@ -346,17 +437,24 @@ export function Sidebar({
 
 	const handleDuplicate = useCallback(
 		async (noteId: string) => {
-			const res = await fetch(`/api/notes/${noteId}`);
-			if (!res.ok) return;
-			const note = await res.json();
-			const createRes = await fetch("/api/notes", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ workspaceId, folderId: note.folderId }),
-			});
-			if (createRes.ok) {
+			try {
+				const res = await fetch(`/api/notes/${noteId}`);
+				if (!res.ok) {
+					throw new Error("Failed to load note");
+				}
+
+				const note = await res.json();
+				const createRes = await fetch("/api/notes", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ workspaceId, folderId: note.folderId }),
+				});
+				if (!createRes.ok) {
+					throw new Error("Failed to create note copy");
+				}
+
 				const newNote = await createRes.json();
-				await fetch(`/api/notes/${newNote.id}`, {
+				const patchRes = await fetch(`/api/notes/${newNote.id}`, {
 					method: "PATCH",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
@@ -364,7 +462,16 @@ export function Sidebar({
 						content: note.content,
 					}),
 				});
+
+				if (!patchRes.ok) {
+					throw new Error("Failed to finish duplication");
+				}
+
 				onRefresh();
+				toast.success("Note duplicated");
+			} catch (error) {
+				console.error("Failed to duplicate note", error);
+				toast.error("Failed to duplicate");
 			}
 		},
 		[onRefresh, workspaceId],
@@ -377,13 +484,20 @@ export function Sidebar({
 
 			queryClient.setQueryData<WorkspaceTree>(treeKey, (currentTree) => updateNoteInTree(currentTree ?? previousTree, noteId, { emoji }));
 
-			await fetchJson(`/api/notes/${noteId}`, {
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ emoji }),
-			});
+			try {
+				await fetchJson(`/api/notes/${noteId}`, {
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ emoji }),
+				});
 
-			onRefresh();
+				onRefresh();
+				toast.success("Icon updated");
+			} catch (error) {
+				console.error("Failed to update note icon", error);
+				queryClient.setQueryData(treeKey, previousTree);
+				toast.error("Failed to update icon");
+			}
 		},
 		[onRefresh, queryClient, tree, workspaceId],
 	);
@@ -501,7 +615,7 @@ export function Sidebar({
 				kind: "folder",
 				folderId: folder.id,
 				parentId: folder.parentId ?? null,
-				mode: inCenterBand ? "inside" : relativeY < 0.5 ? "before" : "after",
+				mode: relativeY < 0.5 ? "before" : "after",
 			};
 		},
 		[],
@@ -593,6 +707,13 @@ export function Sidebar({
 				return;
 			}
 
+			const destinationLabel =
+				target.kind === "root"
+					? "Workspace"
+					: target.kind === "folder" && target.mode === "inside"
+						? (treeEntryMap.get(target.folderId)?.name ?? "Workspace")
+						: getFolderLabel(target.kind === "note" ? target.parentId : (target.parentId ?? null));
+
 			try {
 				if (onReorderTree) {
 					await onReorderTree(reordered.tree, reordered.payload);
@@ -604,12 +725,14 @@ export function Sidebar({
 					});
 					onRefresh();
 				}
+				toast.success(`Moved to ${destinationLabel}`);
 			} catch (error) {
 				console.error("Failed to persist sidebar tree reorder", error);
+				toast.error("Failed to move item");
 				await onRefresh();
 			}
 		},
-		[clearDragState, getActiveDragItem, onRefresh, onReorderTree, tree, workspaceId],
+		[clearDragState, getActiveDragItem, getFolderLabel, onRefresh, onReorderTree, tree, treeEntryMap, workspaceId],
 	);
 
 	const isDropTargetActive = useCallback(
@@ -766,6 +889,7 @@ export function Sidebar({
 						const isBeforeActive = isDropTargetActive(beforeTarget);
 						const isInsideActive = isDropTargetActive(insideTarget);
 						const isAfterActive = isDropTargetActive(afterTarget);
+						const canCreateSubfolder = canCreateFolderAtParent(folder.id);
 						const handleFolderVisit = () => {
 							toggleFolder(folder.id);
 							onFolderVisited?.(folder.id);
@@ -805,6 +929,7 @@ export function Sidebar({
 													onDelete: () => void handleDelete(folder.id, "folder"),
 													onNewNote: () => void handleCreateNote(folder.id),
 													onNewFolder: () => void handleCreateFolder(folder.id),
+														newFolderDisabled: !canCreateSubfolder,
 												}}
 											/>
 										</div>
@@ -836,6 +961,7 @@ export function Sidebar({
 			);
 		},
 		[
+			canCreateFolderAtParent,
 			handleContextMenu,
 			handleCreateFolder,
 			handleCreateNote,
@@ -947,12 +1073,18 @@ export function Sidebar({
 						</div>
 					)}
 				</div>
-				<button
-					onClick={toggleSidebar}
-					className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
-					title="Collapse sidebar (Ctrl+\)">
-					<PanelLeftClose className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-				</button>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							onClick={toggleSidebar}
+							className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
+							aria-label="Collapse sidebar">
+							<PanelLeftClose className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
+						</button>
+					</TooltipTrigger>
+					<TooltipContent>Collapse sidebar</TooltipContent>
+				</Tooltip>
 			</div>
 
 			<div className="space-y-1 p-2">
@@ -972,6 +1104,14 @@ export function Sidebar({
 					Search
 					<span className="ml-auto text-xs text-[#555555]">Ctrl+K</span>
 				</button>
+				<button
+					type="button"
+					onClick={handleGoPlanner}
+					aria-current={isPlannerRoute ? "page" : undefined}
+					className={`inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-sm transition-colors duration-150 hover:bg-[#1a1a1a] hover:text-[#e8e8e8] ${isPlannerRoute ? "bg-[rgba(255,255,255,0.08)] text-[#e8e8e8]" : "text-[#888888]"}`}>
+					<CalendarDays className="h-4 w-4" />
+					Planner
+				</button>
 				<div ref={createMenuRef} className="relative w-full">
 					<div className="flex w-full items-center gap-1">
 						<button
@@ -981,14 +1121,20 @@ export function Sidebar({
 							<FilePlus className="h-4 w-4" />
 							New Note
 						</button>
-						<button
-							type="button"
-							aria-haspopup="menu"
-							aria-expanded={isCreateMenuOpen}
-							onClick={() => setIsCreateMenuOpen((value) => !value)}
-							className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#888888] transition-colors duration-150 hover:bg-[#1a1a1a] hover:text-[#e8e8e8]">
-							<ChevronDown className="h-3.5 w-3.5" />
-						</button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<button
+									type="button"
+									aria-haspopup="menu"
+									aria-expanded={isCreateMenuOpen}
+									onClick={() => setIsCreateMenuOpen((value) => !value)}
+									aria-label="More options"
+									className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#888888] transition-colors duration-150 hover:bg-[#1a1a1a] hover:text-[#e8e8e8]">
+									<ChevronDown className="h-3.5 w-3.5" />
+								</button>
+							</TooltipTrigger>
+							<TooltipContent>More options</TooltipContent>
+						</Tooltip>
 					</div>
 					{isCreateMenuOpen ? (
 						<div
@@ -998,11 +1144,12 @@ export function Sidebar({
 							<button
 								type="button"
 								role="menuitem"
+								disabled={!canCreateFolderAtParent(null)}
 								onClick={() => {
 									setIsCreateMenuOpen(false);
 									void handleCreateFolder();
 								}}
-								className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+								className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
 								style={{ color: "var(--text-primary)" }}>
 								<FolderPlus className="h-4 w-4" />
 								New Folder
@@ -1021,7 +1168,7 @@ export function Sidebar({
 				onDragOver={handleDragOver}
 				onDragEnd={handleDragEnd}
 				onDragCancel={clearDragState}>
-				<div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-1 py-1 pb-[220px]">
+				<div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-1 py-1 pb-[50px]">
 					{hasVisibleItems ? (
 						<>
 							{renderFolderList(visibleTree.folders, 0)}
@@ -1044,19 +1191,23 @@ export function Sidebar({
 			</DndContext>
 
 			<div className="space-y-1 p-2" style={{ borderTop: "1px solid var(--border-default)" }}>
-				<Link
-					href="/planner"
-					onClick={closeSidebarOnMobile}
-					aria-current={isPlannerRoute ? "page" : undefined}
-					className={`inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-xs transition-colors duration-150 hover:bg-[#1a1a1a] hover:text-[#e8e8e8] ${isPlannerRoute ? "bg-[rgba(255,255,255,0.08)] text-[#e8e8e8]" : ""}`}
-					style={{ color: isPlannerRoute ? "#e8e8e8" : "var(--text-secondary)" }}>
-					<CalendarDays className="h-3.5 w-3.5" />
-					Planner
-				</Link>
+				<button
+					type="button"
+					onClick={handleTrashOpen}
+					data-dock-toggle="true"
+					aria-pressed={isTrashOpen}
+					className={`inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-xs transition-colors duration-150 hover:bg-[#1a1a1a] ${isTrashOpen ? "bg-[rgba(255,255,255,0.08)] text-[#e8e8e8]" : ""}`}
+					style={{ color: "var(--text-secondary)" }}>
+					<span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
+						<Trash2 className="h-3.5 w-3.5" />
+						{hasUnreadTrashItems ? <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-[#7c6aff]" aria-hidden="true" /> : null}
+					</span>
+					Trash
+				</button>
 				<button
 					type="button"
 					onClick={onSettingsOpen}
-					data-settings-toggle="true"
+					data-dock-toggle="true"
 					aria-pressed={isSettingsOpen}
 					className={`inline-flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-xs transition-colors duration-150 hover:bg-[#1a1a1a] ${isSettingsOpen ? "bg-[rgba(255,255,255,0.08)] text-[#e8e8e8]" : ""}`}
 					style={{ color: "var(--text-secondary)" }}>

@@ -1,4 +1,4 @@
-import { after, NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { buildFileAccessUrl } from "@/lib/file-url";
 import { parseNoteCoverMeta } from "@/lib/note-cover";
@@ -7,8 +7,6 @@ import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
 import { invalidateWorkspaceTree } from "@/lib/server-data";
 import { validateNoteTitle } from "@/lib/item-name-validation";
 import { buildSearchableTextValue } from "@/lib/searchable-text";
-import { markNoteEmbeddingStale } from "@/lib/note-server";
-import { enqueueNoteEmbeddingJob } from "@/lib/note-embedding-job";
 import { getNoteSchemaCapabilities } from "@/lib/note-schema";
 
 type FolderPathSegment = {
@@ -22,7 +20,7 @@ async function buildFolderPathSegments(workspaceId: string, folderId: string | n
 	}
 
 	const folders = await prisma.folder.findMany({
-		where: { workspaceId },
+		where: { workspaceId, deletedAt: null },
 		select: {
 			id: true,
 			name: true,
@@ -61,6 +59,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 	const note = await prisma.note.findFirst({
 		where: {
 			id,
+			deletedAt: null,
 			workspace: {
 				userId: session.user.id,
 			},
@@ -90,7 +89,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 	});
 
 	if (!note) {
-		return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+		return NextResponse.json({ error: "Not found" }, { status: 404 });
 	}
 
 	const { workspaceId, ...noteData } = note;
@@ -120,6 +119,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 	const note = await prisma.note.findFirst({
 		where: {
 			id,
+			deletedAt: null,
 			workspace: {
 				userId: session.user.id,
 			},
@@ -131,7 +131,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 	});
 
 	if (!note) {
-		return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+		return NextResponse.json({ error: "Not found" }, { status: 404 });
+	}
+
+	if (folderId !== undefined && folderId !== null) {
+		const targetFolder = await prisma.folder.findFirst({
+			where: {
+				id: folderId,
+				workspaceId: note.workspaceId,
+				deletedAt: null,
+			},
+			select: {
+				id: true,
+			},
+		});
+
+		if (!targetFolder) {
+			return NextResponse.json({ error: "Invalid folder" }, { status: 400 });
+		}
 	}
 	const noteSchemaCapabilities = await getNoteSchemaCapabilities();
 
@@ -172,29 +189,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 			},
 		});
 
-		if (content !== undefined) {
-			await markNoteEmbeddingStale(tx, id, noteSchemaCapabilities);
-		}
-
 		return updatedNote;
 	});
 
 	if (title !== undefined || folderId !== undefined || emoji !== undefined) {
 		await invalidateWorkspaceTree(session.user.id, note.workspaceId);
-	}
-
-	if (content !== undefined) {
-		after(async () => {
-			try {
-				await enqueueNoteEmbeddingJob({
-					noteId: id,
-					origin: req.nextUrl.origin,
-					cookieHeader: req.headers.get("cookie"),
-				});
-			} catch (error) {
-				console.error("[embedding] failed for note", id, error);
-			}
-		});
 	}
 
 	return NextResponse.json(updated);
@@ -211,6 +210,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 	const note = await prisma.note.findFirst({
 		where: {
 			id,
+			deletedAt: null,
 			workspace: {
 				userId: session.user.id,
 			},
@@ -218,34 +218,21 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 		select: {
 			id: true,
 			workspaceId: true,
+			folderId: true,
 		},
 	});
 
 	if (!note) {
-		return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+		return NextResponse.json({ error: "Not found" }, { status: 404 });
 	}
 
-	// Delete associated files from storage then remove DB records and archive note in a single DB transaction
-	const files = await prisma.file.findMany({ where: { noteId: id } });
-
-	const supabase = (await import("@/lib/supabase/server")).createAdminClient();
-
-	for (const f of files) {
-		try {
-			const { error: removeError } = await supabase.storage.from("stacknote-files").remove([f.path]);
-			if (removeError) console.error("Supabase remove error for", f.path, removeError);
-		} catch (err) {
-			console.error("Error removing file from storage:", err);
-		}
-	}
-
-	// Use a DB transaction to delete file records and archive the note atomically
-	try {
-		await prisma.$transaction([prisma.file.deleteMany({ where: { noteId: id } }), prisma.note.updateMany({ where: { id }, data: { isArchived: true } })]);
-	} catch (err) {
-		console.error("DB cleanup/archival failed:", err);
-		return NextResponse.json({ error: "Failed to delete associated files" }, { status: 500 });
-	}
+	await prisma.note.update({
+		where: { id },
+		data: {
+			deletedAt: new Date(),
+			originalParentId: note.folderId,
+		},
+	});
 
 	await invalidateWorkspaceTree(session.user.id, note.workspaceId);
 

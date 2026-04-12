@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 
 import { CollapsedPill } from "@/components/pomodoro/CollapsedPill";
 import { PomodoroTimer } from "@/components/pomodoro/PomodoroTimer";
@@ -81,9 +82,10 @@ function playCompletionTone() {
 
 interface PomodoroWidgetProps {
 	sidebarOffset: number;
+	isHidden?: boolean;
 }
 
-export function PomodoroWidget({ sidebarOffset }: PomodoroWidgetProps) {
+export function PomodoroWidget({ sidebarOffset, isHidden = false }: PomodoroWidgetProps) {
 	const [flash, setFlash] = useState(false);
 	const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window === "undefined" ? false : window.innerWidth < 768));
 	const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">(
@@ -99,6 +101,7 @@ export function PomodoroWidget({ sidebarOffset }: PomodoroWidgetProps) {
 		playCompletionTone();
 		setFlash(true);
 		window.setTimeout(() => setFlash(false), 600);
+		toast.success(sessionType === "focus" ? "Session complete! Take a break." : "Break over. Back to work!");
 
 		if (typeof Notification !== "undefined" && Notification.permission === "granted") {
 			void new Notification(`StackNote ${sessionType === "focus" ? "focus" : "break"} complete`, {
@@ -173,6 +176,7 @@ export function PomodoroWidget({ sidebarOffset }: PomodoroWidgetProps) {
 		const didPlay = await engine.play(soundId);
 		if (!didPlay) {
 			setUnavailableSounds((previousSounds) => new Set(previousSounds).add(soundId));
+			toast.error("Could not load ambient sound");
 			return;
 		}
 
@@ -213,6 +217,10 @@ export function PomodoroWidget({ sidebarOffset }: PomodoroWidgetProps) {
 	}, [sessionState.isCollapsed, setCollapsed]);
 
 	if (typeof window === "undefined") {
+		return null;
+	}
+
+	if (isHidden) {
 		return null;
 	}
 

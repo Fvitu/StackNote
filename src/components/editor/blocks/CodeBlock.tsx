@@ -1,8 +1,11 @@
+/* eslint-disable react-hooks/rules-of-hooks */
+
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { createReactBlockSpec, BlockContentWrapper } from "@blocknote/react";
+import { toast } from "sonner";
 import { detectCodeLanguage } from "@/lib/code-language";
 import { SUPPORTED_LANGUAGES } from "@/lib/shiki-theme";
 import { usePreviewMode } from "@/components/editor/blocks/PreviewModeContext";
@@ -297,6 +300,7 @@ export const codeBlockSpec = createReactBlockSpec(
 									onClick={async () => {
 										await navigator.clipboard.writeText(props.block.props.code);
 										setCopied(true);
+										toast.success("Copied to clipboard");
 										window.setTimeout(() => setCopied(false), 2000);
 									}}>
 									<span className="inline-flex items-center gap-1">

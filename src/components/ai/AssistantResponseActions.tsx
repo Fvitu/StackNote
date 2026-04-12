@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, Clipboard, Plus } from "lucide-react";
+import { toast } from "sonner";
 
 interface AssistantResponseActionsProps {
 	content: string;
@@ -19,9 +20,14 @@ export function AssistantResponseActions({ content, onAppendToNote, showAppendBu
 			return;
 		}
 
-		await navigator.clipboard.writeText(content);
-		setCopied(true);
-		window.setTimeout(() => setCopied(false), 1500);
+		try {
+			await navigator.clipboard.writeText(content);
+			setCopied(true);
+			toast.success("Copied to clipboard");
+			window.setTimeout(() => setCopied(false), 1500);
+		} catch {
+			toast.error("Could not copy response");
+		}
 	};
 
 	const handleAppend = async () => {
@@ -29,12 +35,18 @@ export function AssistantResponseActions({ content, onAppendToNote, showAppendBu
 			return;
 		}
 
-		const didAppend = await onAppendToNote(content);
-		if (didAppend === false) {
-			return;
+		try {
+			const didAppend = await onAppendToNote(content);
+			if (didAppend === false) {
+				toast.error("Could not insert into note");
+				return;
+			}
+			setAppended(true);
+			toast.success("Inserted into note");
+			window.setTimeout(() => setAppended(false), 1500);
+		} catch {
+			toast.error("Could not insert into note");
 		}
-		setAppended(true);
-		window.setTimeout(() => setAppended(false), 1500);
 	};
 
 	return (

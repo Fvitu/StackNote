@@ -12,14 +12,24 @@ interface NoteOption {
 	updatedAt: string;
 }
 
-interface NewExamDialogProps {
-	open: boolean;
-	notes: NoteOption[];
-	onClose: () => void;
-	onCreate: (payload: { title: string; subject?: string; examDate: string; noteIds: string[]; dailyStudyMinutes: number }) => Promise<void>;
+interface ExamDraft {
+	title: string;
+	subject?: string | null;
+	examDate: string;
+	noteIds: string[];
+	dailyStudyMinutes: number;
 }
 
-export function NewExamDialog({ open, notes, onClose, onCreate }: NewExamDialogProps) {
+interface NewExamDialogProps {
+	open: boolean;
+	mode: "create" | "edit";
+	notes: NoteOption[];
+	initialExam?: ExamDraft | null;
+	onClose: () => void;
+	onSubmit: (payload: ExamDraft) => Promise<void>;
+}
+
+export function NewExamDialog({ open, mode, notes, initialExam, onClose, onSubmit }: NewExamDialogProps) {
 	const [title, setTitle] = useState("");
 	const [subject, setSubject] = useState("");
 	const [examDate, setExamDate] = useState("");
@@ -27,21 +37,21 @@ export function NewExamDialog({ open, notes, onClose, onCreate }: NewExamDialogP
 	const [dailyStudyMinutes, setDailyStudyMinutes] = useState(20);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
-	const minExamDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
+	const todayKey = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
 	useEffect(() => {
 		if (!open) {
 			return;
 		}
 
-		setTitle("");
-		setSubject("");
-		setExamDate("");
-		setSelectedNoteIds([]);
-		setDailyStudyMinutes(20);
+		setTitle(initialExam?.title ?? "");
+		setSubject(initialExam?.subject ?? "");
+		setExamDate(initialExam?.examDate ?? "");
+		setSelectedNoteIds(initialExam?.noteIds ?? []);
+		setDailyStudyMinutes(initialExam?.dailyStudyMinutes ?? 20);
 		setIsSubmitting(false);
 		setSubmitError(null);
-	}, [open]);
+	}, [initialExam, open]);
 
 	const canSubmit = useMemo(() => title.trim().length > 0 && examDate && selectedNoteIds.length > 0, [examDate, selectedNoteIds, title]);
 
@@ -54,16 +64,16 @@ export function NewExamDialog({ open, notes, onClose, onCreate }: NewExamDialogP
 		setSubmitError(null);
 
 		try {
-			await onCreate({
+			await onSubmit({
 				title: title.trim(),
-				subject: subject.trim() || undefined,
+				subject: subject.trim() || null,
 				examDate,
 				noteIds: selectedNoteIds,
 				dailyStudyMinutes,
 			});
 			onClose();
 		} catch (error) {
-			setSubmitError(error instanceof Error ? error.message : "Failed to create exam");
+			setSubmitError(error instanceof Error ? error.message : "Failed to save assessment");
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -73,9 +83,11 @@ export function NewExamDialog({ open, notes, onClose, onCreate }: NewExamDialogP
 		<Dialog open={open} onOpenChange={(nextOpen) => (!nextOpen ? onClose() : null)}>
 			<DialogContent className="!top-1/2 !left-1/2 !w-[calc(100vw-1rem)] !max-w-[min(42rem,calc(100vw-1rem))] !max-h-[calc(100dvh-1rem)] !-translate-x-1/2 !-translate-y-1/2 border-[var(--border-default)] bg-[var(--bg-sidebar)] p-0 text-[var(--text-primary)]">
 				<DialogHeader className="border-b px-4 py-4 sm:px-6 sm:py-5" style={{ borderColor: "var(--border-default)" }}>
-					<DialogTitle>New exam</DialogTitle>
+					<DialogTitle>{mode === "edit" ? "Edit assessment" : "New exam"}</DialogTitle>
 					<DialogDescription className="text-[var(--text-secondary)]">
-						Link your notes, pick the exam date, and let StackNote create day-by-day question sessions from that material.
+						{mode === "edit"
+							? "Update the title, subject, linked notes, and study goal. The planner will regenerate the schedule with the new details."
+							: "Link your notes, pick the exam date, and let StackNote create day-by-day question sessions from that material."}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -109,7 +121,7 @@ export function NewExamDialog({ open, notes, onClose, onCreate }: NewExamDialogP
 							type="date"
 							value={examDate}
 							onChange={(event) => setExamDate(event.target.value)}
-							min={minExamDate}
+							min={mode === "create" ? todayKey : undefined}
 							className="h-11 w-full rounded-xl border bg-[var(--bg-surface)] px-3 outline-none"
 							style={{ borderColor: "var(--border-default)", color: "var(--text-primary)" }}
 						/>
@@ -164,7 +176,7 @@ export function NewExamDialog({ open, notes, onClose, onCreate }: NewExamDialogP
 									Daily study goal
 								</p>
 								<p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-									StackNote turns this into a daily question budget based on the linked notes.
+									StackNote turns this into a daily review budget based on the linked notes.
 								</p>
 							</div>
 							<span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
@@ -196,7 +208,7 @@ export function NewExamDialog({ open, notes, onClose, onCreate }: NewExamDialogP
 							onClick={() => void handleSubmit()}
 							disabled={!canSubmit || isSubmitting}
 							className="w-full bg-[var(--sn-accent)] text-white hover:bg-[#8f7fff] sm:w-auto">
-							{isSubmitting ? "Creating..." : "Create exam"}
+							{isSubmitting ? (mode === "edit" ? "Saving..." : "Creating...") : mode === "edit" ? "Save changes" : "Create exam"}
 						</Button>
 					</div>
 				</div>

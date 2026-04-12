@@ -56,19 +56,19 @@ function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): Works
 			return { ...state, expandedFolders: next };
 		}
 		case "SET_SIDEBAR_WIDTH":
-			return { ...state, sidebarWidth: action.width };
+			return state.sidebarWidth === action.width ? state : { ...state, sidebarWidth: action.width };
 		case "TOGGLE_SIDEBAR":
 			return { ...state, isSidebarOpen: !state.isSidebarOpen };
 		case "SET_SIDEBAR_OPEN":
-			return { ...state, isSidebarOpen: action.isOpen };
+			return state.isSidebarOpen === action.isOpen ? state : { ...state, isSidebarOpen: action.isOpen };
 		case "TOGGLE_FOCUS_MODE":
 			return { ...state, isFocusMode: !state.isFocusMode };
 		case "SET_FOCUS_MODE":
-			return { ...state, isFocusMode: action.isFocusMode };
+			return state.isFocusMode === action.isFocusMode ? state : { ...state, isFocusMode: action.isFocusMode };
 		case "SET_AI_PANEL_OPEN":
-			return { ...state, isAiPanelOpen: action.isOpen };
+			return state.isAiPanelOpen === action.isOpen ? state : { ...state, isAiPanelOpen: action.isOpen };
 		case "SET_AI_PANEL_WIDTH":
-			return { ...state, aiPanelWidth: action.width };
+			return state.aiPanelWidth === action.width ? state : { ...state, aiPanelWidth: action.width };
 		default:
 			return state;
 	}

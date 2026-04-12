@@ -11,8 +11,6 @@ import { parseAssistantResponseContent } from "@/lib/ai-response";
 import { noteContentToText, truncateToTokenLimit } from "@/lib/ai/note-content";
 import { parseFlashcardDeckMessage } from "@/lib/flashcard-chat-message";
 import { parseQuizHistoryMessage } from "@/lib/quiz-chat-message";
-import { buildRagContext } from "@/lib/semantic-search";
-import { getCurrentWorkspace } from "@/lib/server-data";
 
 export const maxDuration = 60;
 
@@ -240,6 +238,7 @@ export async function POST(req: NextRequest) {
 				where: {
 					id: { in: effectiveContextNoteIds },
 					isArchived: false,
+					deletedAt: null,
 					workspaceId: { in: accessibleWorkspaceIds },
 				},
 				select: {
@@ -288,10 +287,6 @@ export async function POST(req: NextRequest) {
 		noteContextText = buildContextText(contextNotes);
 		contextLabel = buildContextLabel(contextNotes);
 		persistedNoteId = noteId && contextNotes.some((contextNote) => contextNote.id === noteId) ? noteId : null;
-
-		const ragResult = await buildRagContext(latestUserMessage, activeSession.workspaceId, persistedNoteId ?? activeSession.noteId);
-		ragContext = ragResult.context;
-		ragNoteCount = ragResult.noteCount;
 
 		const recentMessages = await prisma.aIMessage.findMany({
 			where: {
@@ -350,12 +345,8 @@ export async function POST(req: NextRequest) {
 	} else {
 		const shouldUseWorkspaceContext = contextMode === "workspace";
 		if (shouldUseWorkspaceContext) {
-			const workspace = await getCurrentWorkspace(userId);
-			if (workspace) {
-				const ragResult = await buildRagContext(latestUserMessage, workspace.id);
-				ragContext = ragResult.context;
-				ragNoteCount = ragResult.noteCount;
-			}
+			ragContext = "";
+			ragNoteCount = 0;
 		}
 
 		const systemPrompt = [

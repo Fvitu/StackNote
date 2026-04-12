@@ -6,9 +6,9 @@ import { EditorSkeleton } from "@/components/layout/AppShellSkeleton";
 import type { NoteTreeItem, WorkspaceTree } from "@/types";
 
 const NoteWorkspaceClient = lazy(async () => {
-	const module = await import("@/components/layout/NoteWorkspace");
+	const noteWorkspaceModule = await import("@/components/layout/NoteWorkspace");
 
-	return { default: module.NoteWorkspace };
+	return { default: noteWorkspaceModule.NoteWorkspace };
 });
 
 interface MainContentProps {

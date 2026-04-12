@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { folderHierarchyExceedsMaxDepth } from "@/lib/folder-depth";
 import { invalidateWorkspaceTree } from "@/lib/server-data";
 
 type FolderReorderInput = {
@@ -128,11 +129,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
 		const [workspaceFolders, workspaceNotes] = await Promise.all([
 			prisma.folder.findMany({
-				where: { workspaceId },
+				where: { workspaceId, deletedAt: null },
 				select: { id: true, parentId: true },
 			}),
 			prisma.note.findMany({
-				where: { workspaceId, isArchived: false },
+				where: { workspaceId, isArchived: false, deletedAt: null },
 				select: { id: true, folderId: true },
 			}),
 		]);
@@ -165,6 +166,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
 		if (hasFolderCycle(folderParents)) {
 			return NextResponse.json({ error: "Folder hierarchy cycle detected" }, { status: 400 });
+		}
+
+		if (folderHierarchyExceedsMaxDepth(folderParents)) {
+			return NextResponse.json({ error: "Maximum folder nesting depth reached" }, { status: 400 });
 		}
 
 		await prisma.$transaction(async (tx) => {

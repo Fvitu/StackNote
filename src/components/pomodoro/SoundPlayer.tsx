@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useMemo } from "react";
 
 import type { AmbientSoundId } from "@/lib/sounds";
 import { AMBIENT_SOUNDS } from "@/lib/sounds";
@@ -24,17 +25,13 @@ export function SoundPlayer({ activeSounds, unavailableSounds, volume, onToggleS
 	const didDragRef = useRef(false);
 	const [isDragging, setIsDragging] = useState(false);
 
-	const handleWindowPointerMoveRef = useRef<((event: PointerEvent) => void) | null>(null);
-	const handleWindowPointerUpRef = useRef<((event: PointerEvent) => void) | null>(null);
-	const handleWindowPointerCancelRef = useRef<((event: PointerEvent) => void) | null>(null);
+	const dragHandlers = useMemo(() => {
+		const stopDragging = () => {
+			dragStateRef.current = null;
+			setIsDragging(false);
+		};
 
-	const stopDragging = () => {
-		dragStateRef.current = null;
-		setIsDragging(false);
-	};
-
-	if (handleWindowPointerMoveRef.current === null) {
-		handleWindowPointerMoveRef.current = (event: PointerEvent) => {
+		const handleWindowPointerMove = (event: PointerEvent) => {
 			const dragState = dragStateRef.current;
 			if (dragState === null || dragState.pointerId !== event.pointerId || scrollRef.current === null) {
 				return;
@@ -55,80 +52,76 @@ export function SoundPlayer({ activeSounds, unavailableSounds, volume, onToggleS
 			event.preventDefault();
 			scrollRef.current.scrollLeft = dragState.startScrollLeft - deltaX;
 		};
-	}
 
-	if (handleWindowPointerUpRef.current === null) {
-		handleWindowPointerUpRef.current = (event: PointerEvent) => {
+		const handleWindowPointerUp = (event: PointerEvent) => {
 			const dragState = dragStateRef.current;
 			if (dragState === null || dragState.pointerId !== event.pointerId) {
 				return;
 			}
 
-			window.removeEventListener("pointermove", handleWindowPointerMoveRef.current!);
-			window.removeEventListener("pointerup", handleWindowPointerUpRef.current!);
-			window.removeEventListener("pointercancel", handleWindowPointerCancelRef.current!);
+			window.removeEventListener("pointermove", handleWindowPointerMove);
+			window.removeEventListener("pointerup", handleWindowPointerUp);
+			window.removeEventListener("pointercancel", handleWindowPointerCancel);
 			stopDragging();
 		};
-	}
 
-	if (handleWindowPointerCancelRef.current === null) {
-		handleWindowPointerCancelRef.current = (event: PointerEvent) => {
+		const handleWindowPointerCancel = (event: PointerEvent) => {
 			const dragState = dragStateRef.current;
 			if (dragState === null || dragState.pointerId !== event.pointerId) {
 				return;
 			}
 
-			window.removeEventListener("pointermove", handleWindowPointerMoveRef.current!);
-			window.removeEventListener("pointerup", handleWindowPointerUpRef.current!);
-			window.removeEventListener("pointercancel", handleWindowPointerCancelRef.current!);
+			window.removeEventListener("pointermove", handleWindowPointerMove);
+			window.removeEventListener("pointerup", handleWindowPointerUp);
+			window.removeEventListener("pointercancel", handleWindowPointerCancel);
 			stopDragging();
 		};
-	}
 
-	const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-		if (event.button !== 0 || scrollRef.current === null || dragStateRef.current !== null) {
-			return;
-		}
+		const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+			if (event.button !== 0 || scrollRef.current === null || dragStateRef.current !== null) {
+				return;
+			}
 
-		dragStateRef.current = {
-			pointerId: event.pointerId,
-			startX: event.clientX,
-			startScrollLeft: scrollRef.current.scrollLeft,
-			hasDragged: false,
+			dragStateRef.current = {
+				pointerId: event.pointerId,
+				startX: event.clientX,
+				startScrollLeft: scrollRef.current.scrollLeft,
+				hasDragged: false,
+			};
+			didDragRef.current = false;
+
+			window.addEventListener("pointermove", handleWindowPointerMove, { passive: false });
+			window.addEventListener("pointerup", handleWindowPointerUp);
+			window.addEventListener("pointercancel", handleWindowPointerCancel);
 		};
-		didDragRef.current = false;
 
-		window.addEventListener("pointermove", handleWindowPointerMoveRef.current!, { passive: false });
-		window.addEventListener("pointerup", handleWindowPointerUpRef.current!);
-		window.addEventListener("pointercancel", handleWindowPointerCancelRef.current!);
-	};
+		const handleClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+			if (!didDragRef.current) {
+				return;
+			}
 
-	const handleClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
-		if (!didDragRef.current) {
-			return;
-		}
+			event.preventDefault();
+			event.stopPropagation();
+			didDragRef.current = false;
+			setIsDragging(false);
+		};
 
-		event.preventDefault();
-		event.stopPropagation();
-		didDragRef.current = false;
-		setIsDragging(false);
-	};
+		return {
+			handlePointerDown,
+			handleClickCapture,
+			handleWindowPointerMove,
+			handleWindowPointerUp,
+			handleWindowPointerCancel,
+		};
+	}, []);
 
 	useEffect(() => {
 		return () => {
-			if (handleWindowPointerMoveRef.current !== null) {
-				window.removeEventListener("pointermove", handleWindowPointerMoveRef.current);
-			}
-
-			if (handleWindowPointerUpRef.current !== null) {
-				window.removeEventListener("pointerup", handleWindowPointerUpRef.current);
-			}
-
-			if (handleWindowPointerCancelRef.current !== null) {
-				window.removeEventListener("pointercancel", handleWindowPointerCancelRef.current);
-			}
+			window.removeEventListener("pointermove", dragHandlers.handleWindowPointerMove);
+			window.removeEventListener("pointerup", dragHandlers.handleWindowPointerUp);
+			window.removeEventListener("pointercancel", dragHandlers.handleWindowPointerCancel);
 		};
-	}, []);
+	}, [dragHandlers]);
 
 	return (
 		<div className="mt-5 border-t pt-4" style={{ borderColor: "var(--border-default)" }}>
@@ -137,8 +130,8 @@ export function SoundPlayer({ activeSounds, unavailableSounds, volume, onToggleS
 			</p>
 			<div
 				ref={scrollRef}
-				onPointerDown={handlePointerDown}
-				onClickCapture={handleClickCapture}
+				onPointerDown={dragHandlers.handlePointerDown}
+				onClickCapture={dragHandlers.handleClickCapture}
 				className={`stacknote-scrollbar-hidden mt-3 overflow-x-hidden select-none overscroll-x-contain touch-pan-y rounded-2xl ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}>
 				<div className="flex min-w-max items-center gap-2 px-0.5 py-0.5">
 					{AMBIENT_SOUNDS.map((sound) => {

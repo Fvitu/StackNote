@@ -1,10 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo, type PointerEvent as ReactPointerEvent } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { FileText, Plus, PanelLeftOpen, Undo2, Redo2, CalendarClock, Clock3, History, Sparkles, Brain } from "lucide-react";
+import { toast } from "sonner";
 import { AIPanelSkeleton } from "@/components/ai/AIPanelSkeleton";
 import { LazyNoteEditor } from "@/components/editor/LazyNoteEditor";
 import type { NoteEditorRef } from "@/components/editor/NoteEditor";
@@ -13,6 +14,7 @@ import { SaveIndicator } from "@/components/editor/SaveIndicator";
 import { EditorSkeleton, EmojiPickerSkeleton } from "@/components/layout/AppShellSkeleton";
 import { Breadcrumb, type BreadcrumbSegment } from "@/components/layout/Breadcrumb";
 import { NoteCoverPanel } from "@/components/layout/NoteCoverPanel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { NoteActionsMenu } from "@/components/layout/NoteActionsMenu";
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize";
@@ -34,14 +36,14 @@ type EmojiSelection = { emoji: string };
 
 const EmojiPickerClient = dynamic(
 	async () => {
-		const module = await import("emoji-picker-react");
+		const emojiPicker = await import("emoji-picker-react");
 
 		return function EmojiPickerWithTheme(props: { onEmojiClick: (emojiData: EmojiSelection) => void }) {
 			return (
-				<module.default
+				<emojiPicker.default
 					onEmojiClick={props.onEmojiClick}
-					theme={module.Theme.DARK}
-					emojiStyle={module.EmojiStyle.APPLE}
+					theme={emojiPicker.Theme.DARK}
+					emojiStyle={emojiPicker.EmojiStyle.APPLE}
 					autoFocusSearch
 					lazyLoadEmojis
 					searchPlaceholder="Search emojis"
@@ -58,17 +60,20 @@ const EmojiPickerClient = dynamic(
 		loading: () => <EmojiPickerSkeleton />,
 	},
 );
-const NoteVersionsDialogClient = dynamic(() => import("@/components/layout/NoteVersionsDialog").then((module) => module.NoteVersionsDialog), {
-	ssr: false,
-});
+const NoteVersionsDialogClient = dynamic(
+	() => import("@/components/layout/NoteVersionsDialog").then((noteVersionsDialog) => noteVersionsDialog.NoteVersionsDialog),
+	{
+		ssr: false,
+	},
+);
 
 function loadAISidePanelModule() {
 	return import("@/components/ai/AISidePanel");
 }
 
 const AISidePanelClient = lazy(async () => {
-	const module = await loadAISidePanelModule();
-	return { default: module.AISidePanel };
+	const aiSidePanel = await loadAISidePanelModule();
+	return { default: aiSidePanel.AISidePanel };
 });
 
 interface NoteWorkspaceProps {
@@ -322,6 +327,7 @@ export function NoteWorkspace({
 	const [isAiPanelResizing, setIsAiPanelResizing] = useState(false);
 	const [marqueeSelection, setMarqueeSelection] = useState<MarqueeSelection | null>(null);
 	const [isMarqueeActive, setIsMarqueeActive] = useState(false);
+	const { setAiPanelOpen, setWorkspaceAiPanelWidth } = useWorkspace();
 	const aiPanelRef = useRef<HTMLDivElement | null>(null);
 	const aiPanelWidthDraftRef = useRef(getStoredAiPanelWidth() ?? DEFAULT_AI_PANEL_WIDTH);
 	const aiPanelResizeStartXRef = useRef(0);
@@ -352,6 +358,11 @@ export function NoteWorkspace({
 		setIsAiPanelMounted(true);
 		setIsAIPanelOpen(true);
 	}, [activeNoteId]);
+
+	useEffect(() => {
+		setAiPanelOpen(isAIPanelOpen);
+		setWorkspaceAiPanelWidth(aiPanelWidth);
+	}, [aiPanelWidth, isAIPanelOpen, setAiPanelOpen, setWorkspaceAiPanelWidth]);
 
 	const applyEditorWidth = useCallback((width: number) => {
 		editorWidthDraftRef.current = width;
@@ -509,6 +520,44 @@ export function NoteWorkspace({
 			updatedAt: string;
 		};
 	}, []);
+
+	const serializeContentSnapshot = useCallback((content: unknown): string => {
+		try {
+			return JSON.stringify(normalizeBlockNoteContent(content)) ?? "null";
+		} catch {
+			return "null";
+		}
+	}, []);
+
+	const getPersistedSnapshot = useCallback(
+		(noteId: string): { content: unknown; updatedAt: string } | null => {
+			if (noteRef.current?.id === noteId) {
+				return {
+					content: noteRef.current.content,
+					updatedAt: noteRef.current.updatedAt,
+				};
+			}
+
+			const queryNote = queryClient.getQueryData<NoteData>(queryKeys.note(noteId));
+			if (queryNote) {
+				return {
+					content: queryNote.content,
+					updatedAt: queryNote.updatedAt,
+				};
+			}
+
+			const cachedNote = noteCache.getCachedNote(noteId);
+			if (cachedNote && !cachedNote.dirty) {
+				return {
+					content: cachedNote.content,
+					updatedAt: cachedNote.updatedAt,
+				};
+			}
+
+			return null;
+		},
+		[noteCache, queryClient],
+	);
 
 	const createVersionRequest = useCallback(async (noteId: string, payload: { manual: boolean; label?: string; content?: unknown }) => {
 		const response = await fetch(`/api/notes/${noteId}/versions`, {
@@ -748,6 +797,12 @@ export function NoteWorkspace({
 				currentContentRef.current = normalizedContent;
 			}
 
+			const persistedSnapshot = getPersistedSnapshot(noteId);
+			if (persistedSnapshot && serializeContentSnapshot(normalizedContent) === serializeContentSnapshot(persistedSnapshot.content)) {
+				noteCache.markClean(noteId, persistedSnapshot.updatedAt);
+				return;
+			}
+
 			queueOfflineContent(noteId, normalizedContent);
 
 			if (!isOnline) {
@@ -797,11 +852,13 @@ export function NoteWorkspace({
 			} catch {
 				if (noteRef.current?.id === noteId) {
 					markSaveFailure();
+					toast.error("Auto-save failed. Check your connection.", { id: "note-autosave-error" });
 				}
 			}
 		},
 		[
 			cacheNoteSnapshot,
+			getPersistedSnapshot,
 			isOnline,
 			markSaveFailure,
 			markSaveSuccess,
@@ -809,6 +866,7 @@ export function NoteWorkspace({
 			persistNoteContent,
 			queryClient,
 			queueOfflineContent,
+			serializeContentSnapshot,
 			syncNoteQueryCache,
 			updateCurrentNoteState,
 		],
@@ -818,6 +876,18 @@ export function NoteWorkspace({
 		(noteId: string, content: unknown) => {
 			const normalizedContent = normalizeBlockNoteContent(content);
 			const isActiveTarget = noteRef.current?.id === noteId;
+			const persistedSnapshot = getPersistedSnapshot(noteId);
+
+			if (persistedSnapshot && serializeContentSnapshot(normalizedContent) === serializeContentSnapshot(persistedSnapshot.content)) {
+				noteCache.markClean(noteId, persistedSnapshot.updatedAt);
+				if (isActiveTarget) {
+					hasEditsSinceVersionRef.current = false;
+					lastEditAtRef.current = null;
+					firstEditSinceVersionAtRef.current = null;
+				}
+				return;
+			}
+
 			if (isActiveTarget) {
 				currentContentRef.current = normalizedContent;
 
@@ -834,7 +904,7 @@ export function NoteWorkspace({
 				setSaveStatus("offline");
 			}
 		},
-		[isOnline, queueOfflineContent],
+		[getPersistedSnapshot, isOnline, noteCache, queueOfflineContent, serializeContentSnapshot],
 	);
 
 	const handleSaveTitle = useCallback(
@@ -891,9 +961,11 @@ export function NoteWorkspace({
 						cacheNoteSnapshot(nextNote);
 						syncNoteQueryCache(nextNote);
 					}
+					toast.success("Icon updated");
 				}
 			} catch {
 				markSaveFailure();
+				toast.error("Failed to update icon");
 			}
 			onRefresh();
 		},
@@ -923,17 +995,23 @@ export function NoteWorkspace({
 
 	const handleDuplicate = useCallback(async () => {
 		if (!note) return;
-		const res = await fetch(`/api/notes/${note.id}`);
-		if (!res.ok) return;
-		const noteData = await res.json();
-		const createRes = await fetch("/api/notes", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ workspaceId, folderId: noteData.folderId }),
-		});
-		if (createRes.ok) {
+		try {
+			const res = await fetch(`/api/notes/${note.id}`);
+			if (!res.ok) {
+				throw new Error("Failed to load note");
+			}
+			const noteData = await res.json();
+			const createRes = await fetch("/api/notes", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ workspaceId, folderId: noteData.folderId }),
+			});
+			if (!createRes.ok) {
+				throw new Error("Failed to create duplicate");
+			}
+
 			const newNote = await createRes.json();
-			await fetch(`/api/notes/${newNote.id}`, {
+			const patchRes = await fetch(`/api/notes/${newNote.id}`, {
 				method: "PATCH",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -943,9 +1021,13 @@ export function NoteWorkspace({
 				}),
 			});
 
+			if (!patchRes.ok) {
+				throw new Error("Failed to finish duplicate");
+			}
+
 			const duplicatedCoverMeta = resolveNoteCoverMeta(noteData.coverImage, noteData.coverImageMeta);
 			if (noteData.coverImage && duplicatedCoverMeta && duplicatedCoverMeta.source !== "upload") {
-				await fetch(`/api/notes/${newNote.id}/cover`, {
+				const coverRes = await fetch(`/api/notes/${newNote.id}/cover`, {
 					method: "PATCH",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
@@ -953,20 +1035,38 @@ export function NoteWorkspace({
 						coverImageMeta: duplicatedCoverMeta,
 					}),
 				});
+
+				if (!coverRes.ok) {
+					throw new Error("Failed to copy cover");
+				}
 			}
 
 			onNoteCreated();
 			onRefresh();
 			onOpenNote(newNote.id);
+			toast.success("Note duplicated");
+		} catch (error) {
+			console.error("Failed to duplicate note", error);
+			toast.error("Failed to duplicate");
 		}
 	}, [note, onNoteCreated, onOpenNote, onRefresh, workspaceId]);
 
 	const handleDelete = useCallback(async () => {
 		if (!note) return;
-		await fetch(`/api/notes/${note.id}`, { method: "DELETE" });
-		onOpenNote(null);
-		onRefresh();
-	}, [note, onOpenNote, onRefresh]);
+		try {
+			const response = await fetch(`/api/notes/${note.id}`, { method: "DELETE" });
+			if (!response.ok) {
+				throw new Error("Failed to delete note");
+			}
+			await queryClient.invalidateQueries({ queryKey: queryKeys.trashStatus });
+			onOpenNote(null);
+			onRefresh();
+			toast.success("Moved to Trash");
+		} catch (error) {
+			console.error("Failed to delete note", error);
+			toast.error("Failed to move note to Trash");
+		}
+	}, [note, onOpenNote, onRefresh, queryClient]);
 
 	const fetchVersions = useCallback(
 		async (noteId: string, showLoading = true): Promise<NoteVersionSummary[]> => {
@@ -1200,8 +1300,10 @@ export function NoteWorkspace({
 				setVersionsOpen(false);
 				await fetchVersions(current.id, false);
 				onRefresh();
+				toast.success("Version restored");
 			} catch {
 				markSaveFailure();
+				toast.error("Failed to restore version");
 			} finally {
 				setRestoringVersionId(null);
 			}
@@ -1247,6 +1349,12 @@ export function NoteWorkspace({
 		}
 		try {
 			for (const dirtyNote of dirtyNotes) {
+				const persistedSnapshot = getPersistedSnapshot(dirtyNote.id);
+				if (persistedSnapshot && serializeContentSnapshot(dirtyNote.content) === serializeContentSnapshot(persistedSnapshot.content)) {
+					noteCache.markClean(dirtyNote.id, persistedSnapshot.updatedAt);
+					continue;
+				}
+
 				const updated = await persistNoteContent(dirtyNote.id, dirtyNote.content);
 				noteCache.markClean(dirtyNote.id, updated.updatedAt);
 
@@ -1285,7 +1393,19 @@ export function NoteWorkspace({
 		} finally {
 			syncInFlightRef.current = false;
 		}
-	}, [cacheNoteSnapshot, isOnline, markSaveFailure, markSyncSuccess, noteCache, persistNoteContent, queryClient, syncNoteQueryCache, updateCurrentNoteState]);
+	}, [
+		cacheNoteSnapshot,
+		getPersistedSnapshot,
+		isOnline,
+		markSaveFailure,
+		markSyncSuccess,
+		noteCache,
+		persistNoteContent,
+		queryClient,
+		serializeContentSnapshot,
+		syncNoteQueryCache,
+		updateCurrentNoteState,
+	]);
 
 	useEffect(() => {
 		void flushDirtyNotes();
@@ -1768,12 +1888,18 @@ export function NoteWorkspace({
 		return (
 			<div className="flex flex-1 flex-col items-center justify-center gap-4 fade-in" style={{ backgroundColor: "var(--bg-app)" }}>
 				{!isSidebarOpen && (
-					<button
-						onClick={onToggleSidebar}
-						className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
-						title="Open sidebar (Ctrl+\)">
-						<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-					</button>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								onClick={onToggleSidebar}
+								className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
+								aria-label="Open sidebar">
+								<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>Open sidebar</TooltipContent>
+					</Tooltip>
 				)}
 				<div className="flex h-16 w-16 items-center justify-center rounded-2xl smooth-bg" style={{ backgroundColor: "var(--bg-surface)" }}>
 					<FileText className="h-8 w-8" style={{ color: "var(--text-tertiary)" }} />
@@ -1823,12 +1949,18 @@ export function NoteWorkspace({
 				<div className="flex h-9 shrink-0 items-center justify-between px-4" style={{ borderBottom: "1px solid var(--border-default)" }}>
 					<div className="flex items-center gap-2">
 						{!isSidebarOpen && (
-							<button
-								onClick={onToggleSidebar}
-								className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
-								title="Open sidebar (Ctrl+\)">
-								<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
-							</button>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<button
+										type="button"
+										onClick={onToggleSidebar}
+										className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a]"
+										aria-label="Open sidebar">
+										<PanelLeftOpen className="h-4 w-4" style={{ color: "var(--text-tertiary)" }} />
+									</button>
+								</TooltipTrigger>
+								<TooltipContent>Open sidebar</TooltipContent>
+							</Tooltip>
 						)}
 						<div className="flex items-center gap-1 text-xs min-w-0" style={{ color: "var(--text-tertiary)" }}>
 							<div
@@ -1847,56 +1979,86 @@ export function NoteWorkspace({
 					<div className="flex items-center gap-2">
 						<SaveIndicator status={saveStatus} />
 						{!isMobileScreen && (
-							<button
-								type="button"
-								onClick={openVersionsDialog}
-								disabled={state.isFocusMode}
-								className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${state.isFocusMode ? "cursor-not-allowed opacity-40" : "hover:bg-[#1a1a1a]"}`}
-								title={state.isFocusMode ? "History is disabled in focus mode" : "View note history"}>
-								<History className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-								<span style={{ color: "var(--text-tertiary)" }}>History</span>
-							</button>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<button
+										type="button"
+										onClick={openVersionsDialog}
+										disabled={state.isFocusMode}
+										className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${state.isFocusMode ? "cursor-not-allowed opacity-40" : "hover:bg-[#1a1a1a]"}`}
+										aria-label={state.isFocusMode ? "History is disabled in focus mode" : "View note history"}>
+										<History className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+										<span style={{ color: "var(--text-tertiary)" }}>History</span>
+									</button>
+								</TooltipTrigger>
+								<TooltipContent>{state.isFocusMode ? "History is disabled in focus mode" : "View note history"}</TooltipContent>
+							</Tooltip>
 						)}
-						<button
-							type="button"
-							onClick={() => editorRef.current?.undo()}
-							disabled={!canUndo}
-							className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30"
-							title="Undo (Ctrl+Z)">
-							<Undo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-						</button>
-						<button
-							type="button"
-							onClick={() => editorRef.current?.redo()}
-							disabled={!canRedo}
-							className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30"
-							title="Redo (Ctrl+Y)">
-							<Redo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
-						</button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<button
+									type="button"
+									onClick={() => editorRef.current?.undo()}
+									disabled={!canUndo}
+									aria-label="Undo"
+									className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30">
+									<Undo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+								</button>
+							</TooltipTrigger>
+							<TooltipContent>Undo</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<button
+									type="button"
+									onClick={() => editorRef.current?.redo()}
+									disabled={!canRedo}
+									aria-label="Redo"
+									className="flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 hover:bg-[#1a1a1a] disabled:opacity-30">
+									<Redo2 className="h-3.5 w-3.5" style={{ color: "var(--text-tertiary)" }} />
+								</button>
+							</TooltipTrigger>
+							<TooltipContent>Redo</TooltipContent>
+						</Tooltip>
 						{isDesktopScreen ? (
-							<button
-								type="button"
-								onClick={handleToggleFocusMode}
-								className={`flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 ${state.isFocusMode ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
-								title={state.isFocusMode ? "Exit focus mode" : "Enter focus mode"}
-								aria-pressed={state.isFocusMode}>
-								<Brain className="h-3.5 w-3.5" style={{ color: state.isFocusMode ? "var(--sn-accent)" : "var(--text-tertiary)" }} />
-							</button>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<button
+										type="button"
+										onClick={handleToggleFocusMode}
+										className={`flex h-6 w-6 items-center justify-center rounded-[var(--sn-radius-sm)] transition-colors duration-150 ${state.isFocusMode ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
+										aria-label={state.isFocusMode ? "Exit focus mode" : "Focus mode"}
+										aria-pressed={state.isFocusMode}>
+										<Brain className="h-3.5 w-3.5" style={{ color: state.isFocusMode ? "var(--sn-accent)" : "var(--text-tertiary)" }} />
+									</button>
+								</TooltipTrigger>
+								<TooltipContent>{state.isFocusMode ? "Exit focus mode" : "Focus mode"}</TooltipContent>
+							</Tooltip>
 						) : null}
-						<button
-							type="button"
-							onClick={handleToggleAIPanel}
-							disabled={state.isFocusMode}
-							className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${state.isFocusMode ? "cursor-not-allowed opacity-40" : isAIPanelOpen ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
-							title={state.isFocusMode ? "AI Assistant is disabled in focus mode" : "AI Assistant"}>
-							<Sparkles
-								className="h-3.5 w-3.5"
-								style={{ color: state.isFocusMode ? "var(--text-tertiary)" : isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)" }}
-							/>
-							<span style={{ color: state.isFocusMode ? "var(--text-tertiary)" : isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)" }}>
-								AI
-							</span>
-						</button>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<button
+									type="button"
+									onClick={handleToggleAIPanel}
+									disabled={state.isFocusMode}
+									className={`flex h-6 items-center gap-1 rounded-[var(--sn-radius-sm)] px-2 text-xs transition-colors duration-150 ${state.isFocusMode ? "cursor-not-allowed opacity-40" : isAIPanelOpen ? "bg-[#1a1a1a]" : "hover:bg-[#1a1a1a]"}`}
+									aria-label={state.isFocusMode ? "AI Assistant is disabled in focus mode" : "AI Assistant"}>
+									<Sparkles
+										className="h-3.5 w-3.5"
+										style={{
+											color: state.isFocusMode ? "var(--text-tertiary)" : isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)",
+										}}
+									/>
+									<span
+										style={{
+											color: state.isFocusMode ? "var(--text-tertiary)" : isAIPanelOpen ? "var(--sn-accent)" : "var(--text-tertiary)",
+										}}>
+										AI
+									</span>
+								</button>
+							</TooltipTrigger>
+							<TooltipContent>{state.isFocusMode ? "AI Assistant is disabled in focus mode" : "AI Assistant"}</TooltipContent>
+						</Tooltip>
 						<NoteActionsMenu
 							type="note"
 							align="end"
@@ -1929,12 +2091,18 @@ export function NoteWorkspace({
 					<div className="mb-2 flex items-start gap-3" style={{ pointerEvents: state.isFocusMode ? "none" : undefined }}>
 						{/* Emoji selector button */}
 						<div ref={emojiWrapperRef} className="relative mt-1 shrink-0">
-							<button
-								onClick={() => setEmojiPickerOpen((v) => !v)}
-								className="flex h-10 w-10 items-center justify-center rounded-[var(--sn-radius-md)] text-xl transition-colors duration-150 hover:bg-[#1a1a1a]"
-								title="Change icon">
-								{note.emoji ? <span>{note.emoji}</span> : <FileText className="h-5 w-5" style={{ color: "var(--text-tertiary)" }} />}
-							</button>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<button
+										type="button"
+										onClick={() => setEmojiPickerOpen((v) => !v)}
+										className="flex h-10 w-10 items-center justify-center rounded-[var(--sn-radius-md)] text-xl transition-colors duration-150 hover:bg-[#1a1a1a]"
+										aria-label="Change icon">
+										{note.emoji ? <span>{note.emoji}</span> : <FileText className="h-5 w-5" style={{ color: "var(--text-tertiary)" }} />}
+									</button>
+								</TooltipTrigger>
+								<TooltipContent>Change icon</TooltipContent>
+							</Tooltip>
 
 							{/* Emoji picker popup */}
 							{emojiPickerOpen && (
@@ -2064,9 +2232,8 @@ export function NoteWorkspace({
 						width:
 							typeof window !== "undefined" && window.innerWidth < 768 ? (isAIPanelOpen ? "100%" : 0) : isAIPanelOpen ? `${aiPanelWidth}px` : 0,
 						opacity: isAIPanelOpen ? 1 : 0,
-						transform: isAIPanelOpen ? "translateX(0)" : "translateX(12px)",
-						transition: isAiPanelResizing ? "none" : "width 220ms ease, opacity 160ms linear, transform 220ms ease",
-						willChange: "opacity, transform",
+						transform: "none",
+						transition: isAiPanelResizing ? "none" : "width 220ms ease, opacity 160ms linear",
 					}}>
 					<div
 						onMouseDown={startAiPanelResize}

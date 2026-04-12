@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
-import { FileText, PanelLeftOpen } from "lucide-react";
+import { Loader2, PanelLeftOpen } from "lucide-react";
+import { StackNoteLogo } from "@/components/branding/StackNoteLogo";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function getInitials(userName?: string | null, userEmail?: string | null) {
@@ -214,7 +215,7 @@ export function AppShellSkeleton({
 
 				<div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 fade-in">
 					<div className="flex h-16 w-16 items-center justify-center rounded-2xl smooth-bg" style={{ backgroundColor: "var(--bg-surface)" }}>
-						<FileText className="h-8 w-8" style={{ color: "var(--text-tertiary)" }} />
+						<StackNoteLogo className="h-8 w-8" alt="StackNote" />
 					</div>
 					<div className="max-w-[32rem] text-center">
 						<h1
@@ -222,15 +223,10 @@ export function AppShellSkeleton({
 							style={{ color: "var(--text-primary)" }}>
 							{resolvedWorkspaceName}
 						</h1>
-						<p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-							Select a note or create a new one
-						</p>
-					</div>
-					<div
-						className="flex items-center gap-2 rounded-[var(--sn-radius-md)] px-4 py-2 text-sm"
-						style={{ backgroundColor: "var(--bg-surface)", color: "var(--text-secondary)" }}>
-						<FileText className="h-4 w-4" />
-						Create your first note
+						<div className="mt-2 flex items-center justify-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+							<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+							<span>Loading content...</span>
+						</div>
 					</div>
 				</div>
 			</div>

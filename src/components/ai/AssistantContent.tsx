@@ -29,7 +29,7 @@ function ReasoningDetails({ reasoning, defaultOpen, isStreaming }: ReasoningDeta
 				setIsReasoningOpen((event.currentTarget as HTMLDetailsElement).open);
 			}}>
 			<summary className="flex cursor-pointer items-center justify-between gap-3">
-				<span className="flex items-center gap-2 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+				<span className="fl pbqzgex items-center gap-2 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
 					<Brain className="h-3.5 w-3.5" style={{ color: "var(--sn-accent)" }} />
 					{isStreaming ? "Thinking" : "Thought process"}
 				</span>

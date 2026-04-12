@@ -62,7 +62,7 @@ export function SidebarContextMenu({ x, y, type, onRename, onDelete, onNewNote, 
 	}
 
 	items.push({
-		label: "Delete",
+		label: "Move to Trash",
 		icon: <Trash2 className="h-3.5 w-3.5" />,
 		action: onDelete,
 		destructive: true,

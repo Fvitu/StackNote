@@ -1,6 +1,7 @@
 "use client";
 
 import { Pause, Play } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface CollapsedPillProps {
 	remainingLabel: string;
@@ -57,20 +58,25 @@ export function CollapsedPill({ remainingLabel, progress, accentColor, isRunning
 					<span className="flex-1 text-left font-medium" style={{ color: "var(--text-primary)" }}>
 						{remainingLabel}
 					</span>
-					<button
-						type="button"
-						onClick={(event) => {
-							event.stopPropagation();
-							onToggle();
-						}}
-						className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-[rgba(255,255,255,0.08)]"
-						aria-label={isRunning ? "Pause timer" : "Start timer"}>
-						{isRunning ? (
-							<Pause className="h-3.5 w-3.5" style={{ color: "var(--text-primary)" }} />
-						) : (
-							<Play className="h-3.5 w-3.5" style={{ color: "var(--text-primary)" }} />
-						)}
-					</button>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								onClick={(event) => {
+									event.stopPropagation();
+									onToggle();
+								}}
+								className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-[rgba(255,255,255,0.08)]"
+								aria-label={isRunning ? "Pause timer" : "Start timer"}>
+								{isRunning ? (
+									<Pause className="h-3.5 w-3.5" style={{ color: "var(--text-primary)" }} />
+								) : (
+									<Play className="h-3.5 w-3.5" style={{ color: "var(--text-primary)" }} />
+								)}
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>{isRunning ? "Pause timer" : "Start timer"}</TooltipContent>
+					</Tooltip>
 				</>
 			)}
 		</div>

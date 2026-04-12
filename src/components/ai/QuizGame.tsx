@@ -5,6 +5,7 @@ import { Brain } from "lucide-react";
 
 import { MarkdownContent } from "@/components/ai/MarkdownContent";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { QuizOptionId, QuizQuestion } from "@/lib/quiz";
 
 interface QuizGameProps {
@@ -303,16 +304,21 @@ export function QuizGame({ title, questions, onExit }: QuizGameProps) {
 					</p>
 				</div>
 				<div className="flex items-center gap-2">
-					<button
-						type="button"
-						onClick={() => void toggleFullscreen()}
-						aria-pressed={isFullscreen}
-						title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-						className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-							isFullscreen ? "bg-[var(--bg-hover)] text-[var(--sn-accent)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-						}`}>
-						<Brain className="h-4 w-4" />
-					</button>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								onClick={() => void toggleFullscreen()}
+								aria-pressed={isFullscreen}
+								aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+								className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+									isFullscreen ? "bg-[var(--bg-hover)] text-[var(--sn-accent)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+								}`}>
+								<Brain className="h-4 w-4" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>{isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}</TooltipContent>
+					</Tooltip>
 					<button
 						type="button"
 						onClick={onExit}

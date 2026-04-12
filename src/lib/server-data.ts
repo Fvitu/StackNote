@@ -1,4 +1,3 @@
-import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { buildCacheKey, cacheDelete, cacheGetJson, cacheSetJson } from "@/lib/cache";
 import { noteContentToText } from "@/lib/ai/note-content";
@@ -32,25 +31,17 @@ function buildTreeKey(userId: string, workspaceId: string) {
 	return buildCacheKey("stacknote", "user", userId, "workspace", workspaceId, "tree");
 }
 
-const getCurrentWorkspaceUncached = unstable_cache(
-	async (userId: string) => {
-		return prisma.workspace.findFirst({
-			where: { userId },
-			orderBy: { createdAt: "asc" },
-			select: { id: true, name: true },
-		});
-	},
-	["stacknote-current-workspace"],
-	{ revalidate: 60 },
-);
-
 export async function getCurrentWorkspace(userId: string): Promise<WorkspaceSummary | null> {
 	const cachedWorkspace = await cacheGetJson<WorkspaceSummary>(buildWorkspaceKey(userId));
 	if (cachedWorkspace) {
 		return cachedWorkspace;
 	}
 
-	const workspace = await getCurrentWorkspaceUncached(userId);
+	const workspace = await prisma.workspace.findFirst({
+		where: { userId },
+		orderBy: { createdAt: "asc" },
+		select: { id: true, name: true },
+	});
 	if (!workspace) {
 		return null;
 	}
@@ -175,7 +166,7 @@ export async function getWorkspaceTree(userId: string, workspaceId: string, opti
 
 	const [folders, notes] = await Promise.all([
 		prisma.folder.findMany({
-			where: { workspaceId },
+			where: { workspaceId, deletedAt: null },
 			orderBy: { order: "asc" },
 			select: {
 				id: true,
@@ -185,7 +176,7 @@ export async function getWorkspaceTree(userId: string, workspaceId: string, opti
 			},
 		}),
 		prisma.note.findMany({
-			where: { workspaceId, isArchived: false },
+			where: { workspaceId, isArchived: false, deletedAt: null },
 			orderBy: { order: "asc" },
 			select: {
 				id: true,
@@ -238,7 +229,7 @@ export async function getWorkspaceContextNotes(userId: string, workspaceId: stri
 
 	const [notes, folders] = await Promise.all([
 		prisma.note.findMany({
-			where: { workspaceId, isArchived: false },
+			where: { workspaceId, isArchived: false, deletedAt: null },
 			orderBy: { order: "asc" },
 			select: {
 				id: true,
@@ -249,7 +240,7 @@ export async function getWorkspaceContextNotes(userId: string, workspaceId: stri
 			},
 		}),
 		prisma.folder.findMany({
-			where: { workspaceId },
+			where: { workspaceId, deletedAt: null },
 			select: {
 				id: true,
 				name: true,

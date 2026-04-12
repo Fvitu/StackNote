@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
 				in: exam.noteIds,
 			},
 			isArchived: false,
+			deletedAt: null,
 			workspace: {
 				userId: session.user.id,
 			},

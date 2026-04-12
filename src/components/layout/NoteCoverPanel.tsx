@@ -12,6 +12,7 @@ import {
 	useState,
 } from "react";
 import { Check, ExternalLink, Crosshair, Move, ImagePlus, Link2, Loader2, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -320,6 +321,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 
 			const updated = await parseCoverResponse(response);
 			onCoverUpdated(updated);
+			toast.success("Cover updated");
 			if (closeDialog) {
 				setIsDialogOpen(false);
 			}
@@ -553,6 +555,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 			const updated = await parseCoverResponse(response);
 			onCoverUpdated(updated);
 			setIsDialogOpen(false);
+			toast.success("Cover updated");
 		} catch (error) {
 			setActionError(error instanceof Error ? error.message : "Failed to upload cover");
 		} finally {
@@ -576,6 +579,7 @@ export function NoteCoverPanel({ noteId, coverImage, coverImageMeta, onCoverUpda
 			const updated = await parseCoverResponse(response);
 			onCoverUpdated(updated);
 			setIsDialogOpen(false);
+			toast.success("Cover removed");
 		} catch (error) {
 			setActionError(error instanceof Error ? error.message : "Failed to remove cover");
 		} finally {

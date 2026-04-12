@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ArrowDown, Pause, Play, RotateCcw, Settings2, SkipForward, TimerReset } from "lucide-react";
 
 import { SoundPlayer } from "@/components/pomodoro/SoundPlayer";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { PomodoroSessionState, PomodoroSettings } from "@/hooks/usePomodoro";
 import type { AmbientSoundId } from "@/lib/sounds";
 
@@ -77,20 +78,30 @@ export function PomodoroTimer({
 					</p>
 				</div>
 				<div className="flex items-center gap-1">
-					<button
-						type="button"
-						onClick={onCollapse}
-						className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[rgba(255,255,255,0.08)]"
-						aria-label="Close Pomodoro">
-						<ArrowDown className="h-4 w-4" style={{ color: "var(--text-secondary)" }} />
-					</button>
-					<button
-						type="button"
-						onClick={onOpenSettings}
-						className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[rgba(255,255,255,0.08)]"
-						aria-label="Pomodoro settings">
-						<Settings2 className="h-4 w-4" style={{ color: "var(--text-secondary)" }} />
-					</button>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								onClick={onCollapse}
+								className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[rgba(255,255,255,0.08)]"
+								aria-label="Exit focus mode">
+								<ArrowDown className="h-4 w-4" style={{ color: "var(--text-secondary)" }} />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>Exit focus mode</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								onClick={onOpenSettings}
+								className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[rgba(255,255,255,0.08)]"
+								aria-label="Timer settings">
+								<Settings2 className="h-4 w-4" style={{ color: "var(--text-secondary)" }} />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>Timer settings</TooltipContent>
+					</Tooltip>
 				</div>
 			</div>
 

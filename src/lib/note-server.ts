@@ -1,7 +1,7 @@
 import { normalizeBlockNoteContent } from "@/lib/blocknote-normalize"
 import { NOTE_VERSION_LIMIT } from "@/lib/note-versioning"
 import { buildSearchableTextValue } from "@/lib/searchable-text";
-import { getNoteSchemaCapabilities, type NoteSchemaCapabilities } from "@/lib/note-schema";
+import { getNoteSchemaCapabilities } from "@/lib/note-schema";
 import type { Prisma } from "@/generated/prisma/client"
 
 interface CreateVersionInput {
@@ -46,41 +46,10 @@ export async function updateNoteSearchVector(tx: Prisma.TransactionClient, noteI
   `;
 }
 
-export async function markNoteEmbeddingStale(tx: Prisma.TransactionClient, noteId: string, schemaCapabilities?: NoteSchemaCapabilities) {
-	const schema = schemaCapabilities ?? (await getNoteSchemaCapabilities());
-
-	if (schema.hasEmbeddingColumn && schema.hasVectorUpdatedAtColumn) {
-		await tx.$executeRaw`
-      UPDATE "notes"
-      SET "embedding" = NULL,
-          "vectorUpdatedAt" = NULL
-      WHERE "id" = ${noteId}
-    `;
-		return;
-	}
-
-	if (schema.hasEmbeddingColumn) {
-		await tx.$executeRaw`
-      UPDATE "notes"
-      SET "embedding" = NULL
-      WHERE "id" = ${noteId}
-    `;
-		return;
-	}
-
-	if (schema.hasVectorUpdatedAtColumn) {
-		await tx.$executeRaw`
-      UPDATE "notes"
-      SET "vectorUpdatedAt" = NULL
-      WHERE "id" = ${noteId}
-    `;
-	}
-}
-
-export async function autosaveNoteContent(tx: Prisma.TransactionClient, noteId: string, content: unknown, schemaCapabilities?: NoteSchemaCapabilities) {
+export async function autosaveNoteContent(tx: Prisma.TransactionClient, noteId: string, content: unknown) {
 	const normalizedContent = normalizeBlockNoteContent(content) as Prisma.InputJsonValue;
 	const searchableText = buildSearchableTextValue(normalizedContent);
-	const schema = schemaCapabilities ?? (await getNoteSchemaCapabilities());
+	const schema = await getNoteSchemaCapabilities();
 	const updateData: Prisma.NoteUpdateInput = {
 		content: normalizedContent,
 	};
@@ -96,8 +65,6 @@ export async function autosaveNoteContent(tx: Prisma.TransactionClient, noteId: 
 			updatedAt: true,
 		},
 	});
-
-	await markNoteEmbeddingStale(tx, noteId, schema);
 
 	return {
 		updatedNote,

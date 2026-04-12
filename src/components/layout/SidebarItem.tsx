@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Folder, FileText, ChevronRight, MoreHorizontal } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NoteActionsMenu } from "./NoteActionsMenu";
 
 interface SidebarItemProps {
@@ -37,6 +38,7 @@ interface SidebarItemProps {
 		onDelete?: () => void;
 		onNewNote?: () => void;
 		onNewFolder?: () => void;
+		newFolderDisabled?: boolean;
 	};
 }
 
@@ -93,10 +95,14 @@ export function SidebarItem({
 		}
 	};
 
-	const handleKeyDown = (e: React.KeyboardEvent) => {
+	const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
 		if (e.key === "Enter") {
+			e.preventDefault();
+			e.stopPropagation();
 			handleRenameSubmit();
 		} else if (e.key === "Escape") {
+			e.preventDefault();
+			e.stopPropagation();
 			onCancelRename?.();
 		}
 	};
@@ -166,20 +172,27 @@ export function SidebarItem({
 			onContextMenu={onContextMenu}>
 			{/* Expand arrow for folders */}
 			{type === "folder" ? (
-				<button
-					onClick={(e) => {
-						e.stopPropagation();
-						onToggle?.();
-					}}
-					className="flex h-4 w-4 shrink-0 items-center justify-center">
-					<ChevronRight
-						className={`${isHomeCardVariant ? "h-3.5 w-3.5" : "h-3 w-3"} transition-transform duration-150`}
-						style={{
-							color: "var(--text-tertiary)",
-							transform: isExpanded ? "rotate(90deg)" : undefined,
-						}}
-					/>
-				</button>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							onClick={(e) => {
+								e.stopPropagation();
+								onToggle?.();
+							}}
+							aria-label={isExpanded ? "Collapse" : "Expand"}
+							className="flex h-4 w-4 shrink-0 items-center justify-center">
+							<ChevronRight
+								className={`${isHomeCardVariant ? "h-3.5 w-3.5" : "h-3 w-3"} transition-transform duration-150`}
+								style={{
+									color: "var(--text-tertiary)",
+									transform: isExpanded ? "rotate(90deg)" : undefined,
+								}}
+							/>
+						</button>
+					</TooltipTrigger>
+					<TooltipContent>{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+				</Tooltip>
 			) : (
 				<span className="w-4" />
 			)}
@@ -199,7 +212,10 @@ export function SidebarItem({
 					ref={inputRef}
 					value={editName}
 					onChange={(e) => setEditName(e.target.value)}
-					onBlur={handleRenameSubmit}
+					onBlur={(e) => {
+						e.stopPropagation();
+						handleRenameSubmit();
+					}}
 					onKeyDown={handleKeyDown}
 					onClick={(e) => e.stopPropagation()}
 					className="ml-1 flex-1 rounded-[var(--sn-radius-sm)] border-0 bg-[#1a1a1a] px-1 py-0 text-xs text-[#e8e8e8] outline-none focus:ring-2 focus:ring-[var(--sn-accent)]"
@@ -227,14 +243,18 @@ export function SidebarItem({
 						onDelete={menuActions.onDelete}
 						onNewNote={menuActions.onNewNote}
 						onNewFolder={menuActions.onNewFolder}
+						newFolderDisabled={menuActions.newFolderDisabled}
 					/>
 				) : (
 					<button
+						type="button"
 						onClick={(e) => {
 							e.stopPropagation();
 							onMoreClick?.(e);
 						}}
 						className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-[var(--sn-radius-sm)] group-hover:flex"
+						aria-label="More options"
+						title="More options"
 						style={{ color: "var(--text-tertiary)" }}
 						onMouseEnter={(e) => {
 							(e.currentTarget as HTMLElement).style.backgroundColor = "var(--bg-active)";

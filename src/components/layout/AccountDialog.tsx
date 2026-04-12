@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { BadgeCheck, BriefcaseBusiness, LogOut, Mail, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { toast } from "sonner";
 import { GuestInfo } from "@/components/ui/GuestInfo";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -94,8 +95,10 @@ export function AccountDialog({
 		setProfileState({ status: "saving" });
 		try {
 			await onSaveUserName(trimmedName);
+			toast.success("Name updated");
 			setProfileState({ status: "saved", message: "Name updated." });
 		} catch {
+			toast.error("We couldn't save your name.");
 			setProfileState({ status: "error", message: "We couldn't save your name." });
 		}
 	};
@@ -117,8 +120,10 @@ export function AccountDialog({
 		setWorkspaceState({ status: "saving" });
 		try {
 			await onSaveWorkspaceName(trimmedName);
+			toast.success("Workspace updated");
 			setWorkspaceState({ status: "saved", message: "Workspace updated." });
 		} catch {
+			toast.error("We couldn't save the workspace name.");
 			setWorkspaceState({ status: "error", message: "We couldn't save the workspace name." });
 		}
 	};
@@ -216,6 +221,7 @@ export function AccountDialog({
 											onClick={async () => {
 												setIsSigningOut(true);
 												try {
+													toast("Signing out...");
 													await signOutAction();
 												} finally {
 													setIsSigningOut(false);

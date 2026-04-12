@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Globe2, Layers, Loader2, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 
 import { UsageIndicator } from "@/components/ai/UsageIndicator";
 import { Button } from "@/components/ui/button";
@@ -127,8 +128,10 @@ export function GenerateFlashcardsDialog({ open, onClose, onGenerated, defaultTe
 
 			onGenerated(data);
 			onClose();
+			toast.success(`Deck created (${data.count} cards)`);
 		} catch (requestError) {
 			setError(requestError instanceof Error ? requestError.message : "Failed to generate flashcards");
+			toast.error("Failed to generate deck");
 		} finally {
 			setIsGenerating(false);
 		}

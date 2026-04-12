@@ -20,7 +20,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileAudio2, FileImage, FilePlus, FileText, Folder, FolderPlus, MoreHorizontal, Pencil, Smile, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Copy, FileAudio2, FileImage, FilePlus, FileText, Folder, FolderPlus, MoreHorizontal, Pencil, Smile, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,8 +32,9 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { fetchJson } from "@/lib/api-client";
+import { fetchJson, fetchJsonOrNullOnNotFound } from "@/lib/api-client";
 import { buildFileAccessUrl } from "@/lib/file-url";
+import { buildFolderDepthMap, canCreateFolderUnderParent } from "@/lib/folder-depth";
 import { FOLDER_NAME_MAX_LENGTH, NAME_FORBIDDEN_CHARACTERS_REGEX, NOTE_TITLE_MAX_LENGTH } from "@/lib/item-name-validation";
 import { queryKeys } from "@/lib/query-keys";
 import { FilePreviewModal } from "@/components/home/FilePreviewModal";
@@ -52,7 +54,6 @@ type FilterId = (typeof FILTERS)[number]["id"];
 type TreeItemType = "folder" | "note" | "file";
 type SelectedItem = { id: string; type: TreeItemType } | null;
 type EditingItem = { id: string; type: TreeItemType } | null;
-type PendingDelete = { id: string; type: TreeItemType; name: string } | null;
 
 type PreviewableFile = {
 	name: string;
@@ -336,6 +337,10 @@ function applyTreeReorder(tree: HomeFileTree, dragItem: DraggableItem, dropTarge
 		}
 
 		if (dropTarget.kind === "note") {
+			return null;
+		}
+
+		if (dropTarget.kind === "folder" && dropTarget.mode === "inside") {
 			return null;
 		}
 
@@ -840,6 +845,7 @@ function RowMenu({
 	onChangeEmoji,
 	onNewNote,
 	onNewFolder,
+	onNewFolderDisabled = false,
 }: {
 	type: TreeItemType;
 	onRename: () => void;
@@ -848,6 +854,7 @@ function RowMenu({
 	onChangeEmoji?: () => void;
 	onNewNote?: () => void;
 	onNewFolder?: () => void;
+	onNewFolderDisabled?: boolean;
 }) {
 	return (
 		<DropdownMenu>
@@ -856,43 +863,79 @@ function RowMenu({
 					<button
 						type="button"
 						onClick={(event) => event.stopPropagation()}
+						onPointerDown={(event) => event.stopPropagation()}
 						onKeyDown={(event) => event.stopPropagation()}
 						className="flex h-7 w-7 items-center justify-center rounded-md opacity-0 transition-opacity hover:bg-white/5 group-hover:opacity-100"
 					/>
 				}>
 				<MoreHorizontal className="h-4 w-4 text-zinc-500" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="min-w-40 border border-white/10 bg-[#181818] text-white">
-				<DropdownMenuItem onClick={onRename} className="text-white">
+			<DropdownMenuContent
+				align="end"
+				className="min-w-40 border border-white/10 bg-[#181818] text-white"
+				onClick={(event) => event.stopPropagation()}
+				onPointerDown={(event) => event.stopPropagation()}>
+				<DropdownMenuItem
+					onClick={(event) => {
+						event.stopPropagation();
+						onRename();
+					}}
+					className="text-white">
 					<Pencil className="h-4 w-4" />
 					Rename
 				</DropdownMenuItem>
 				{type === "note" && onChangeEmoji ? (
-					<DropdownMenuItem onClick={onChangeEmoji} className="text-white">
+					<DropdownMenuItem
+						onClick={(event) => {
+							event.stopPropagation();
+							onChangeEmoji();
+						}}
+						className="text-white">
 						<Smile className="h-4 w-4" />
 						Change icon
 					</DropdownMenuItem>
 				) : null}
 				{type === "note" && onDuplicate ? (
-					<DropdownMenuItem onClick={onDuplicate} className="text-white">
+					<DropdownMenuItem
+						onClick={(event) => {
+							event.stopPropagation();
+							onDuplicate();
+						}}
+						className="text-white">
 						<Copy className="h-4 w-4" />
 						Duplicate
 					</DropdownMenuItem>
 				) : null}
 				{type === "folder" && onNewNote ? (
-					<DropdownMenuItem onClick={onNewNote} className="text-white">
+					<DropdownMenuItem
+						onClick={(event) => {
+							event.stopPropagation();
+							onNewNote();
+						}}
+						className="text-white">
 						<FilePlus className="h-4 w-4" />
 						New note
 					</DropdownMenuItem>
 				) : null}
 				{type === "folder" && onNewFolder ? (
-					<DropdownMenuItem onClick={onNewFolder} className="text-white">
+					<DropdownMenuItem
+						onClick={(event) => {
+							event.stopPropagation();
+							onNewFolder();
+						}}
+						disabled={onNewFolderDisabled}
+						className="text-white">
 						<FolderPlus className="h-4 w-4" />
 						New folder
 					</DropdownMenuItem>
 				) : null}
 				<DropdownMenuSeparator className="bg-white/5" />
-				<DropdownMenuItem onClick={onDelete} variant="destructive">
+				<DropdownMenuItem
+					onClick={(event) => {
+						event.stopPropagation();
+						onDelete();
+					}}
+					variant="destructive">
 					<Trash2 className="h-4 w-4" />
 					Delete
 				</DropdownMenuItem>
@@ -997,11 +1040,24 @@ export function FileExplorer({
 	const [activeFilter, setActiveFilter] = useState<FilterId>("note");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [editingItem, setEditingItem] = useState<EditingItem>(null);
-	const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
 	const [previewFile, setPreviewFile] = useState<PreviewableFile>(null);
 	const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 	const [activeDragId, setActiveDragId] = useState<string | null>(null);
 	const [emojiPickerNoteId, setEmojiPickerNoteId] = useState<string | null>(null);
+	const [isMobileLayout, setIsMobileLayout] = useState(() => {
+		if (typeof window === "undefined") {
+			return false;
+		}
+
+		return window.matchMedia("(max-width: 639px)").matches;
+	});
+	const [isFileManagerCollapsed, setIsFileManagerCollapsed] = useState(() => {
+		if (typeof window === "undefined") {
+			return false;
+		}
+
+		return window.matchMedia("(max-width: 639px)").matches;
+	});
 	const [isCoarsePointerInput, setIsCoarsePointerInput] = useState(false);
 	const dragItemRef = useRef<DraggableItem | null>(null);
 	const suppressRowClickUntilRef = useRef(0);
@@ -1010,7 +1066,7 @@ export function FileExplorer({
 	const [isReordering, setIsReordering] = useState(false);
 	const workspaceTreeQuery = useQuery({
 		queryKey: treeKey,
-		queryFn: () => fetchJson<WorkspaceTree>(`/api/workspace/${workspaceId}/tree`),
+		queryFn: ({ signal }) => fetchJson<WorkspaceTree>(`/api/workspace/${workspaceId}/tree`, { signal }),
 		enabled: workspaceId.length > 0,
 		staleTime: 30_000,
 	});
@@ -1082,6 +1138,31 @@ export function FileExplorer({
 			return;
 		}
 
+		const mobileQuery = window.matchMedia("(max-width: 639px)");
+		const updateMobileLayout = () => {
+			const isMobile = mobileQuery.matches;
+			setIsMobileLayout(isMobile);
+			if (!isMobile) {
+				setIsFileManagerCollapsed(false);
+			}
+		};
+
+		updateMobileLayout();
+
+		if (typeof mobileQuery.addEventListener === "function") {
+			mobileQuery.addEventListener("change", updateMobileLayout);
+			return () => mobileQuery.removeEventListener("change", updateMobileLayout);
+		}
+
+		mobileQuery.addListener(updateMobileLayout);
+		return () => mobileQuery.removeListener(updateMobileLayout);
+	}, []);
+
+	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+
 		const coarsePointerQuery = window.matchMedia("(pointer: coarse)");
 		const updatePointerType = () => {
 			setIsCoarsePointerInput(coarsePointerQuery.matches);
@@ -1104,6 +1185,7 @@ export function FileExplorer({
 		}),
 		[activeFilter, tree],
 	);
+	const isFileManagerContentVisible = !isMobileLayout || !isFileManagerCollapsed;
 	const visibleFolderIds = useMemo(() => collectFolderIds(filteredTree.folders), [filteredTree.folders]);
 	const visibleNoteIdsWithFiles = useMemo(
 		() => [...collectNoteIdsWithFilesFromFolders(filteredTree.folders, activeFilter), ...collectNoteIdsWithFiles(filteredTree.rootNotes, activeFilter)],
@@ -1112,6 +1194,17 @@ export function FileExplorer({
 	const canExpandAll = visibleFolderIds.some((id) => !expandedFolders.has(id)) || visibleNoteIdsWithFiles.some((id) => !expandedNotes.has(id));
 	const treeEntries = useMemo(() => collectTreeEntries(tree), [tree]);
 	const treeEntryMap = useMemo(() => new Map(treeEntries.map((entry) => [entry.id, entry])), [treeEntries]);
+	const folderDepthById = useMemo(
+		() =>
+			buildFolderDepthMap(
+				flattenFolders(tree.folders).map((folder) => ({
+					id: folder.id,
+					parentId: folder.parentId,
+				})),
+			),
+		[tree.folders],
+	);
+	const canCreateFolderAtParent = useCallback((parentId: string | null) => canCreateFolderUnderParent(parentId, folderDepthById), [folderDepthById]);
 	const mouseSensor = useSensor(MouseSensor, {
 		activationConstraint: {
 			distance: 6,
@@ -1158,21 +1251,7 @@ export function FileExplorer({
 			return null;
 		}
 
-		const inCenterBand = relativeY >= 0.2 && relativeY <= 0.8;
-
 		if (activeDragItem.type === "note") {
-			return {
-				kind: "folder",
-				folderId: folder.id,
-				parentId: folder.parentId,
-				mode: "inside",
-			};
-		}
-
-		const foldersById = new Map(flattenFolders(tree.folders).map((item) => [item.id, item]));
-		const canNest = inCenterBand && !isFolderDescendant(folder.id, activeDragItem.id, foldersById);
-
-		if (canNest) {
 			return {
 				kind: "folder",
 				folderId: folder.id,
@@ -1274,6 +1353,14 @@ export function FileExplorer({
 
 		const { previousTree } = applyLocalTreeUpdate(() => reordered.tree);
 		setIsReordering(true);
+		const destinationLabel =
+			target.kind === "root"
+				? "Workspace"
+				: target.kind === "folder" && target.mode === "inside"
+					? (treeEntryMap.get(target.folderId)?.name ?? "Workspace")
+					: target.parentId
+						? (treeEntryMap.get(target.parentId)?.name ?? "Workspace")
+						: "Workspace";
 
 		try {
 			await fetchJson(`/api/workspace/${workspaceId}/reorder`, {
@@ -1281,11 +1368,13 @@ export function FileExplorer({
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(reordered.payload),
 			});
+			toast.success(`Moved to ${destinationLabel}`);
 
 			startTransition(() => router.refresh());
 		} catch (error) {
 			console.error("Failed to persist tree reorder", error);
 			rollbackTree(previousTree);
+			toast.error("Failed to move item");
 			startTransition(() => router.refresh());
 		} finally {
 			setIsReordering(false);
@@ -1480,16 +1569,22 @@ export function FileExplorer({
 			applyLocalTreeUpdate((current) => updateNoteInTree(current, tempId, () => confirmedNote));
 			setSelectedItem((current) => (current?.type === "note" && current.id === tempId ? { id: confirmedNote.id, type: "note" } : current));
 			setEditingItem((current) => (current?.type === "note" && current.id === tempId ? { id: confirmedNote.id, type: "note" } : current));
+			toast.success("Note created");
 			return confirmedNote;
 		} catch (error) {
 			rollbackTree(previousTree);
 			setEditingItem((current) => (current?.type === "note" && current.id === tempId ? null : current));
 			setSelectedItem((current) => (current?.type === "note" && current.id === tempId ? null : current));
+			toast.error("Failed to create note");
 			throw error;
 		}
 	};
 
 	const createFolder = async (parentId: string | null) => {
+		if (!canCreateFolderAtParent(parentId)) {
+			return null;
+		}
+
 		const tempId = `temp-folder-${Date.now()}`;
 		const optimisticFolder: HomeFolderItem = {
 			id: tempId,
@@ -1535,6 +1630,7 @@ export function FileExplorer({
 			});
 			setSelectedItem((current) => (current?.type === "folder" && current.id === tempId ? { id: createdFolder.id, type: "folder" } : current));
 			setEditingItem((current) => (current?.type === "folder" && current.id === tempId ? { id: createdFolder.id, type: "folder" } : current));
+			toast.success("Folder created");
 			return confirmedFolder;
 		} catch (error) {
 			rollbackTree(previousTree);
@@ -1545,6 +1641,7 @@ export function FileExplorer({
 			});
 			setEditingItem((current) => (current?.type === "folder" && current.id === tempId ? null : current));
 			setSelectedItem((current) => (current?.type === "folder" && current.id === tempId ? null : current));
+			toast.error("Failed to create folder");
 			throw error;
 		}
 	};
@@ -1587,6 +1684,7 @@ export function FileExplorer({
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ name: value }),
 				});
+				toast.success("Folder renamed");
 			}
 
 			if (item.type === "note") {
@@ -1596,6 +1694,7 @@ export function FileExplorer({
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ title: value }),
 				});
+				toast.success("Note renamed");
 			}
 
 			if (item.type === "file") {
@@ -1605,43 +1704,63 @@ export function FileExplorer({
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ name: value }),
 				});
+				toast.success("File renamed");
 			}
 
 			startTransition(() => router.refresh());
 		} catch (error) {
 			rollbackTree(previousTree);
+			toast.error(item.type === "folder" ? "Failed to rename folder" : item.type === "note" ? "Failed to rename note" : "Failed to rename file");
 			throw error;
 		}
 	};
 
-	const handleDeleteConfirmed = async () => {
-		if (!pendingDelete) {
-			return;
-		}
-
-		const target = pendingDelete;
+	const handleDelete = async (target: { id: string; type: TreeItemType }) => {
+		suppressRowClickUntilRef.current = Date.now() + 400;
+		await queryClient.cancelQueries({ queryKey: treeKey });
 		const previousTree = treeRef.current;
-		setPendingDelete(null);
 
 		try {
 			if (target.type === "folder") {
 				applyLocalTreeUpdate((current) => removeFolderFromTree(current, target.id));
-				await fetchJson(`/api/folders/${target.id}`, { method: "DELETE" });
+				const deletedFolder = await fetchJsonOrNullOnNotFound(`/api/folders/${target.id}`, { method: "DELETE" });
+				if (deletedFolder === null) {
+					toast.error("Failed to move folder to Trash");
+				} else {
+					toast.success("Folder moved to Trash");
+				}
 			}
 
 			if (target.type === "note") {
 				applyLocalTreeUpdate((current) => removeNoteFromTree(current, target.id));
-				await fetchJson(`/api/notes/${target.id}`, { method: "DELETE" });
+				const deletedNote = await fetchJsonOrNullOnNotFound(`/api/notes/${target.id}`, { method: "DELETE" });
+				if (deletedNote === null) {
+					toast.error("Failed to move note to Trash");
+				} else {
+					toast.success("Moved to Trash");
+				}
 			}
 
 			if (target.type === "file") {
 				applyLocalTreeUpdate((current) => removeFileFromTree(current, target.id));
-				await fetchJson(`/api/files/${target.id}`, { method: "DELETE" });
+				const deletedFile = await fetchJsonOrNullOnNotFound(`/api/files/${target.id}`, { method: "DELETE" });
+				if (deletedFile === null) {
+					toast.error("Failed to delete file");
+				} else {
+					toast.success("File deleted");
+				}
 			}
+
+			await queryClient.invalidateQueries({ queryKey: queryKeys.trashStatus });
+
+			setSelectedItem((current) => (current?.id === target.id && current.type === target.type ? null : current));
 
 			startTransition(() => router.refresh());
 		} catch (error) {
 			rollbackTree(previousTree);
+			toast.error(
+				target.type === "folder" ? "Failed to move folder to Trash" : target.type === "note" ? "Failed to move note to Trash" : "Failed to delete file",
+			);
 			throw error;
 		}
 	};
@@ -1655,9 +1774,11 @@ export function FileExplorer({
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ emoji }),
 			});
+			toast.success("Icon updated");
 			startTransition(() => router.refresh());
 		} catch (error) {
 			rollbackTree(previousTree);
+			toast.error("Failed to update icon");
 			throw error;
 		}
 	};
@@ -1717,9 +1838,11 @@ export function FileExplorer({
 					files: [],
 				})),
 			);
+			toast.success("Note duplicated");
 			startTransition(() => router.refresh());
 		} catch (error) {
 			rollbackTree(previousTree);
+			toast.error("Failed to duplicate");
 			throw error;
 		}
 	};
@@ -1747,19 +1870,29 @@ export function FileExplorer({
 							<div className="flex min-w-0 flex-1 items-center gap-3">
 								{getFileIcon(file.mediaType)}
 								{isEditing ? (
-									<EditableLabel initialValue={file.name} onSubmit={(value) => void handleRename(editingItem, value)} onCancel={() => setEditingItem(null)} className="h-8 w-full rounded-md border border-white/10 bg-[#0f0f0f] px-2 text-sm text-white outline-none focus:border-[#7c6aff]" />
+									<EditableLabel
+										initialValue={file.name}
+										onSubmit={(value) => void handleRename(editingItem, value)}
+										onCancel={() => setEditingItem(null)}
+										className="h-8 w-full rounded-md border border-white/10 bg-[#0f0f0f] px-2 text-sm text-white outline-none focus:border-[#7c6aff]"
+									/>
 								) : (
-									<button type="button" onClick={() => previewAsset(file)} className="min-w-0 flex-1 truncate text-left text-sm text-zinc-300">
+									<button
+										type="button"
+										onClick={() => previewAsset(file)}
+										className="min-w-0 flex-1 truncate text-left text-sm text-zinc-300">
 										{file.name}
 									</button>
 								)}
 							</div>
 							<div className="hidden items-center gap-2 sm:flex">
-								<span className="shrink-0 text-xs text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100">{formatHoverLabel(file.createdAt)}</span>
+								<span className="shrink-0 text-xs text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100">
+									{formatHoverLabel(file.createdAt)}
+								</span>
 								<RowMenu
 									type="file"
 									onRename={() => setEditingItem({ id: file.id, type: "file" })}
-									onDelete={() => setPendingDelete({ id: file.id, type: "file", name: file.name })}
+									onDelete={() => void handleDelete({ id: file.id, type: "file" })}
 								/>
 							</div>
 						</div>
@@ -1838,19 +1971,23 @@ export function FileExplorer({
 											className="h-8 w-full rounded-md border border-white/10 bg-[#0f0f0f] px-2 text-sm text-white outline-none focus:border-[#7c6aff]"
 										/>
 									) : (
-										<span className="min-w-0 flex-1 select-none line-clamp-1 text-left text-sm text-white" style={{ userSelect: "none", WebkitUserSelect: "none" }}>
+										<span
+											className="min-w-0 flex-1 select-none line-clamp-1 text-left text-sm text-white"
+											style={{ userSelect: "none", WebkitUserSelect: "none" }}>
 											{note.title || "Untitled"}
 										</span>
 									)}
 								</div>
 								<div className="hidden items-center gap-2 sm:flex">
-									<span className="shrink-0 text-xs text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100">{formatHoverLabel(note.updatedAt)}</span>
+									<span className="shrink-0 text-xs text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100">
+										{formatHoverLabel(note.updatedAt)}
+									</span>
 									<RowMenu
 										type="note"
 										onRename={() => setEditingItem({ id: note.id, type: "note" })}
 										onChangeEmoji={() => setEmojiPickerNoteId(note.id)}
 										onDuplicate={() => void handleDuplicateNote(note)}
-										onDelete={() => setPendingDelete({ id: note.id, type: "note", name: note.title || "Untitled" })}
+										onDelete={() => void handleDelete({ id: note.id, type: "note" })}
 									/>
 								</div>
 							</div>
@@ -1872,6 +2009,7 @@ export function FileExplorer({
 				const isEditing = editingItem?.id === folder.id && editingItem.type === "folder";
 				const insideTarget: DropTarget = { kind: "folder", folderId: folder.id, parentId: folder.parentId, mode: "inside" };
 				const isInsideActive = isDropTargetActive(insideTarget);
+				const canCreateSubfolder = canCreateFolderAtParent(folder.id);
 				const rowItem: DraggableItem = { id: folder.id, type: "folder", parentId: folder.parentId };
 
 				return (
@@ -1918,7 +2056,11 @@ export function FileExplorer({
 											onKeyDown={(event) => event.stopPropagation()}
 											onPointerDown={(event) => event.stopPropagation()}
 											className="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500">
-											{isExpanded ? <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" /> : <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />}
+											{isExpanded ? (
+												<ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" />
+											) : (
+												<ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" />
+											)}
 										</button>
 										<Folder className="h-4 w-4 shrink-0 text-zinc-500" />
 										{isEditing ? (
@@ -1932,19 +2074,24 @@ export function FileExplorer({
 												className="h-8 w-full rounded-md border border-white/10 bg-[#0f0f0f] px-2 text-sm text-white outline-none focus:border-[#7c6aff]"
 											/>
 										) : (
-											<span className="truncate select-none text-left text-sm text-white" style={{ userSelect: "none", WebkitUserSelect: "none" }}>
+											<span
+												className="truncate select-none text-left text-sm text-white"
+												style={{ userSelect: "none", WebkitUserSelect: "none" }}>
 												{folder.name}
 											</span>
 										)}
 									</div>
 									<div className="hidden items-center gap-2 sm:flex">
-										<span className="shrink-0 text-xs text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100">{formatHoverLabel(folder.updatedAt)}</span>
+										<span className="shrink-0 text-xs text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100">
+											{formatHoverLabel(folder.updatedAt)}
+										</span>
 										<RowMenu
 											type="folder"
 											onRename={() => setEditingItem({ id: folder.id, type: "folder" })}
-											onDelete={() => setPendingDelete({ id: folder.id, type: "folder", name: folder.name })}
+											onDelete={() => void handleDelete({ id: folder.id, type: "folder" })}
 											onNewNote={() => void createNote(folder.id)}
 											onNewFolder={() => void createFolder(folder.id)}
+											onNewFolderDisabled={!canCreateSubfolder}
 										/>
 									</div>
 								</div>
@@ -1955,13 +2102,19 @@ export function FileExplorer({
 											{renderNotes(visibleNotes, depth + 1)}
 										</SortableContext>
 										{isEmptyFolder ? (
-											<li role="none" className="relative overflow-hidden px-3 py-2 text-xs text-zinc-600" style={{ paddingLeft: `${getRowPaddingLeft(depth + 1, 16)}px` }}>
+											<li
+												role="none"
+												className="relative overflow-hidden px-3 py-2 text-xs text-zinc-600"
+												style={{ paddingLeft: `${getRowPaddingLeft(depth + 1, 16)}px` }}>
 												<TreeGuides depth={depth + 1} extraPadding={8} />
 												Empty folder
 											</li>
 										) : null}
 										{!isEmptyFolder && !hasChildren ? (
-											<li role="none" className="relative overflow-hidden px-3 py-2 text-xs text-zinc-600" style={{ paddingLeft: `${getRowPaddingLeft(depth + 1, 16)}px` }}>
+											<li
+												role="none"
+												className="relative overflow-hidden px-3 py-2 text-xs text-zinc-600"
+												style={{ paddingLeft: `${getRowPaddingLeft(depth + 1, 16)}px` }}>
 												<TreeGuides depth={depth + 1} extraPadding={8} />
 												No matching items
 											</li>
@@ -1976,131 +2129,160 @@ export function FileExplorer({
 		</SortableContext>
 	);
 
+	const canCreateRootFolder = canCreateFolderAtParent(null);
+
 	return (
 		<>
 			<section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/5 bg-[#111111] p-5 sm:p-6">
 				<div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
 					<div className="space-y-2">
-						<p className="text-xs font-medium uppercase tracking-widest text-zinc-500">File Manager</p>
+						<div className="flex items-center justify-between gap-3">
+							<p className="text-xs font-medium uppercase tracking-widest text-zinc-500">File Manager</p>
+							<button
+								type="button"
+								onClick={() => setIsFileManagerCollapsed((current) => !current)}
+								aria-expanded={isFileManagerContentVisible}
+								aria-label={isFileManagerContentVisible ? "Minimize file manager" : "Expand file manager"}
+								className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-[#141414] text-zinc-300 transition-colors hover:bg-white/5 sm:hidden">
+								{isFileManagerContentVisible ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+							</button>
+						</div>
 						<p className="text-sm text-zinc-400">Browse folders, notes, and uploaded study files.</p>
 					</div>
 
-					<div className="flex flex-wrap gap-2">
-						{FILTERS.map((filter) => (
-							<button
-								key={filter.id}
-								type="button"
-								onClick={() => setActiveFilter(filter.id)}
-								className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
-									activeFilter === filter.id
-										? "border-[#7c6aff] bg-[#7c6aff]/10 text-violet-300"
-										: "border-white/5 bg-[#141414] text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
-								}`}>
-								{filter.label}
-							</button>
-						))}
-					</div>
-				</div>
-
-				<div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-					<p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Tree controls</p>
-					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							onClick={() => {
-								setExpandedFolders(new Set(visibleFolderIds));
-								setExpandedNotes(new Set(visibleNoteIdsWithFiles));
-							}}
-							title="Expand all"
-							aria-label="Expand all"
-							disabled={!canExpandAll}
-							className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-transparent text-zinc-300 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50">
-							<ChevronsUpDown className="h-4 w-4" />
-						</button>
-						<button
-							type="button"
-							onClick={() => {
-								setExpandedFolders(new Set());
-								setExpandedNotes(new Set());
-							}}
-							title="Collapse all"
-							aria-label="Collapse all"
-							disabled={expandedFolders.size === 0 && expandedNotes.size === 0}
-							className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-transparent text-zinc-300 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50">
-							<ChevronsDownUp className="h-4 w-4" />
-						</button>
-					</div>
-				</div>
-
-				<DndContext
-					sensors={sensors}
-					collisionDetection={closestCenter}
-					autoScroll={false}
-					onDragStart={handleDragStart}
-					onDragMove={handleDragMove}
-					onDragOver={handleDragOver}
-					onDragEnd={handleDragEnd}
-					onDragCancel={clearDragState}>
-					<div ref={scrollContainerRef} className="relative mt-6 min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y pr-1">
-						{hasVisibleItems ? (
-							<ul role="tree" aria-label="File manager tree" className="min-w-0 space-y-1 overflow-x-hidden">
-								{renderFolderList(filteredTree.folders, 0)}
-								<SortableContext items={filteredTree.rootNotes.map((note) => note.id)} strategy={verticalListSortingStrategy}>
-									{renderNotes(filteredTree.rootNotes, 0)}
-								</SortableContext>
-							</ul>
-						) : (
-							<div className="rounded-2xl border border-dashed border-white/5 bg-[#141414] px-4 py-10 text-center text-sm text-zinc-500">
-								No matching items for this filter.
-							</div>
-						)}
-					</div>
-					{activeDragId ? (
-						<div className="mt-3">
-							<RootDropZone active={isDropTargetActive({ kind: "root" })} />
+					{isFileManagerContentVisible ? (
+						<div className="flex flex-wrap gap-2">
+							{FILTERS.map((filter) => (
+								<button
+									key={filter.id}
+									type="button"
+									onClick={() => setActiveFilter(filter.id)}
+									className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+										activeFilter === filter.id
+											? "border-[#7c6aff] bg-[#7c6aff]/10 text-violet-300"
+											: "border-white/5 bg-[#141414] text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
+									}`}>
+									{filter.label}
+								</button>
+							))}
 						</div>
 					) : null}
-					<DragOverlay>
-						{activeDragEntry ? (
-							<div className="pointer-events-none flex max-w-[300px] items-center gap-2 rounded-xl border border-[#7c6aff]/80 bg-[#1a1435]/95 px-3 py-2 shadow-[0_14px_30px_rgba(9,5,22,0.5)]">
-								{activeDragEntry.type === "folder" ? (
-									<Folder className="h-4 w-4 shrink-0 text-violet-300" />
-								) : activeDragEntry.type === "note" ? (
-									activeDragEntry.emoji ? (
-										<span className="flex h-4 w-4 shrink-0 items-center justify-center text-sm leading-none">{activeDragEntry.emoji}</span>
-									) : (
-										<FileText className="h-4 w-4 shrink-0 text-violet-300" />
-									)
-								) : null}
-								<span className="truncate text-sm font-medium text-violet-100">{activeDragEntry.name || "Untitled"}</span>
-							</div>
-						) : null}
-					</DragOverlay>
-				</DndContext>
-
-				<Separator className="my-5 bg-white/5" />
-
-				<p aria-live="polite" className="mb-3 text-xs text-zinc-500">
-					Tip: drag folders or notes to reorder. On touch devices, press and hold for about half a second to start dragging. Drop in the center of a folder to nest items.
-				</p>
-
-				<div className="flex flex-wrap gap-3">
-					<Button type="button" onClick={() => void handleNewNote()} disabled={isSubmitting || isReordering} className="h-10 rounded-xl bg-[#7c6aff] px-4 text-white hover:bg-[#8b7bff]">
-						<FilePlus className="h-4 w-4" />
-						New note
-					</Button>
-					<Button type="button" variant="outline" onClick={() => void handleNewFolder()} disabled={isSubmitting || isReordering} className="h-10 rounded-xl border-white/5 bg-[#141414] px-4 text-zinc-200 hover:bg-white/5">
-						<FolderPlus className="h-4 w-4" />
-						New folder
-					</Button>
 				</div>
+
+				{isFileManagerContentVisible ? (
+					<>
+						<div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+							<p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Tree controls</p>
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									onClick={() => {
+										setExpandedFolders(new Set(visibleFolderIds));
+										setExpandedNotes(new Set(visibleNoteIdsWithFiles));
+									}}
+									title="Expand all"
+									aria-label="Expand all"
+									disabled={!canExpandAll}
+									className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-transparent text-zinc-300 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50">
+									<ChevronsUpDown className="h-4 w-4" />
+								</button>
+								<button
+									type="button"
+									onClick={() => {
+										setExpandedFolders(new Set());
+										setExpandedNotes(new Set());
+									}}
+									title="Collapse all"
+									aria-label="Collapse all"
+									disabled={expandedFolders.size === 0 && expandedNotes.size === 0}
+									className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-transparent text-zinc-300 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50">
+									<ChevronsDownUp className="h-4 w-4" />
+								</button>
+							</div>
+						</div>
+
+						<DndContext
+							sensors={sensors}
+							collisionDetection={closestCenter}
+							autoScroll={false}
+							onDragStart={handleDragStart}
+							onDragMove={handleDragMove}
+							onDragOver={handleDragOver}
+							onDragEnd={handleDragEnd}
+							onDragCancel={clearDragState}>
+							<div
+								ref={scrollContainerRef}
+								className="relative mt-6 min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y pr-1">
+								{hasVisibleItems ? (
+									<ul role="tree" aria-label="File manager tree" className="min-w-0 space-y-1 overflow-x-hidden">
+										{renderFolderList(filteredTree.folders, 0)}
+										<SortableContext items={filteredTree.rootNotes.map((note) => note.id)} strategy={verticalListSortingStrategy}>
+											{renderNotes(filteredTree.rootNotes, 0)}
+										</SortableContext>
+									</ul>
+								) : (
+									<div className="rounded-2xl border border-dashed border-white/5 bg-[#141414] px-4 py-10 text-center text-sm text-zinc-500">
+										No matching items for this filter.
+									</div>
+								)}
+							</div>
+							{activeDragId ? (
+								<div className="mt-3">
+									<RootDropZone active={isDropTargetActive({ kind: "root" })} />
+								</div>
+							) : null}
+							<DragOverlay>
+								{activeDragEntry ? (
+									<div className="pointer-events-none flex max-w-[300px] items-center gap-2 rounded-xl border border-[#7c6aff]/80 bg-[#1a1435]/95 px-3 py-2 shadow-[0_14px_30px_rgba(9,5,22,0.5)]">
+										{activeDragEntry.type === "folder" ? (
+											<Folder className="h-4 w-4 shrink-0 text-violet-300" />
+										) : activeDragEntry.type === "note" ? (
+											activeDragEntry.emoji ? (
+												<span className="flex h-4 w-4 shrink-0 items-center justify-center text-sm leading-none">{activeDragEntry.emoji}</span>
+											) : (
+												<FileText className="h-4 w-4 shrink-0 text-violet-300" />
+											)
+										) : null}
+										<span className="truncate text-sm font-medium text-violet-100">{activeDragEntry.name || "Untitled"}</span>
+									</div>
+								) : null}
+							</DragOverlay>
+						</DndContext>
+
+						<Separator className="my-5 bg-white/5" />
+
+						<p aria-live="polite" className="mb-3 text-xs text-zinc-500">
+							Tip: drag notes between folders and drag rows to reorder. On touch devices, press and hold for about half a second to start dragging.
+						</p>
+
+						<div className="flex flex-wrap gap-3">
+							<Button
+								type="button"
+								onClick={() => void handleNewNote()}
+								disabled={isSubmitting || isReordering}
+								className="h-10 rounded-xl bg-[#7c6aff] px-4 text-white hover:bg-[#8b7bff]">
+								<FilePlus className="h-4 w-4" />
+								New note
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => void handleNewFolder()}
+								disabled={isSubmitting || isReordering || !canCreateRootFolder}
+								className="h-10 rounded-xl border-white/5 bg-[#141414] px-4 text-zinc-200 hover:bg-white/5">
+								<FolderPlus className="h-4 w-4" />
+								New folder
+							</Button>
+						</div>
+					</>
+				) : null}
 			</section>
 
 			<FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
 			<NoteIconPickerDialog
 				open={emojiPickerNote !== null}
-                noteTitle={emojiPickerNote?.title ?? "Untitled"}
-                emoji={emojiPickerNote?.emoji ?? null}
+				noteTitle={emojiPickerNote?.title ?? "Untitled"}
+				emoji={emojiPickerNote?.emoji ?? null}
 				onOpenChange={(open) => {
 					if (!open) {
 						setEmojiPickerNoteId(null);

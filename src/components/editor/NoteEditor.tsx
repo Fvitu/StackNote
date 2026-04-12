@@ -3,6 +3,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, forwardRef, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from "react";
+import { toast } from "sonner";
 import {
 	useCreateBlockNote,
 	SuggestionMenuController,
@@ -43,6 +44,23 @@ type MinimalBlock = {
 };
 
 const CONTENTLESS_BLOCK_TYPES = new Set(["imageMedia", "linkPreview", "pdfMedia", "audioMedia", "videoEmbed", "equation", "codeBlock", "aiBlock"]);
+const SAFE_INITIAL_BLOCK_TYPES = new Set([
+	"paragraph",
+	"heading",
+	"bulletListItem",
+	"numberedListItem",
+	"checkListItem",
+	"quote",
+	"table",
+	"imageMedia",
+	"linkPreview",
+	"pdfMedia",
+	"audioMedia",
+	"videoEmbed",
+	"equation",
+	"codeBlock",
+	"aiBlock",
+]);
 
 function createSafeBlockId(): string {
 	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -98,37 +116,93 @@ function toSanitizedInlineContent(value: unknown): unknown[] | undefined {
 	return sanitized;
 }
 
+function sanitizeBlockProps(value: unknown): Record<string, unknown> | undefined {
+	if (!isPlainObject(value)) {
+		return undefined;
+	}
+
+	const sanitized: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) {
+		if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+			sanitized[key] = item;
+			continue;
+		}
+
+		if (item === null) {
+			sanitized[key] = item;
+		}
+	}
+
+	return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+function sanitizeBlockChildren(value: unknown): Record<string, unknown>[] | undefined {
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+
+	const sanitized = value.map((child) => sanitizeInitialBlock(child)).filter((child): child is Record<string, unknown> => child !== null);
+
+	return sanitized.length > 0 ? sanitized : undefined;
+}
+
+function createFallbackParagraphBlock(): Record<string, unknown> {
+	return {
+		id: createSafeBlockId(),
+		type: "paragraph",
+		content: [],
+	};
+}
+
 function sanitizeInitialBlock(block: unknown): Record<string, unknown> | null {
 	if (!isPlainObject(block) || typeof block.type !== "string") {
 		return null;
 	}
 
+	if (!SAFE_INITIAL_BLOCK_TYPES.has(block.type)) {
+		const text = typeof block.content === "string" ? block.content : extractTextContent(block.content).trim();
+		return text.length > 0
+			? {
+					id: createSafeBlockId(),
+					type: "paragraph",
+					content: text,
+				}
+			: null;
+	}
+
+	const isContentlessBlock = CONTENTLESS_BLOCK_TYPES.has(block.type);
+
 	const next: Record<string, unknown> = {
-		...block,
 		id: typeof block.id === "string" && block.id.length > 0 ? block.id : createSafeBlockId(),
 		type: block.type,
 	};
 
-	if (CONTENTLESS_BLOCK_TYPES.has(block.type)) {
+	const sanitizedProps = sanitizeBlockProps(block.props);
+	if (sanitizedProps) {
+		next.props = sanitizedProps;
+	}
+
+	if (isContentlessBlock) {
 		delete next.content;
-		delete next.children;
+		next.children = undefined;
 	} else {
 		const sanitizedContent = toSanitizedInlineContent(block.content);
 		if (sanitizedContent !== undefined) {
 			next.content = sanitizedContent;
+		} else if (typeof block.content === "string" && block.content.trim().length > 0) {
+			next.content = block.content;
 		} else {
-			delete next.content;
+			next.content = [];
 		}
 
-		if (Array.isArray(block.children)) {
-			next.children = block.children.map((child) => sanitizeInitialBlock(child)).filter((child): child is Record<string, unknown> => child !== null);
-		} else {
-			delete next.children;
+		const sanitizedChildren = sanitizeBlockChildren(block.children);
+		if (sanitizedChildren) {
+			next.children = sanitizedChildren;
 		}
 	}
 
-	if (next.props !== undefined && !isPlainObject(next.props)) {
-		delete next.props;
+	if (block.type === "table" && !Array.isArray(next.children)) {
+		return createFallbackParagraphBlock();
 	}
 
 	return next;
@@ -142,7 +216,7 @@ function getSafeInitialContent(content: unknown): unknown[] | undefined {
 
 	const sanitizedBlocks = normalized.map((block) => sanitizeInitialBlock(block)).filter((block): block is Record<string, unknown> => block !== null);
 
-	return sanitizedBlocks.length > 0 ? sanitizedBlocks : undefined;
+	return sanitizedBlocks.length > 0 ? sanitizedBlocks : [createFallbackParagraphBlock()];
 }
 
 function sanitizePastedUrl(value: string): string {
@@ -224,8 +298,8 @@ const EMOJI_PANEL_WIDTH = 360;
 const EMOJI_PANEL_HEIGHT = 408;
 const EmojiPickerClient = dynamic(
 	async () => {
-		const module = await import("emoji-picker-react");
-		const EmojiPicker = module.default;
+			const emojiPickerModule = await import("emoji-picker-react");
+			const EmojiPicker = emojiPickerModule.default;
 
 		return function NoteEmojiPicker({
 			onEmojiClick,
@@ -240,8 +314,8 @@ const EmojiPickerClient = dynamic(
 			return (
 				<EmojiPicker
 					onEmojiClick={onEmojiClick}
-					theme={module.Theme.DARK}
-					emojiStyle={module.EmojiStyle.APPLE}
+					theme={emojiPickerModule.Theme.DARK}
+					emojiStyle={emojiPickerModule.EmojiStyle.APPLE}
 					autoFocusSearch={autoFocusSearch}
 					lazyLoadEmojis={lazyLoadEmojis}
 					searchPlaceholder={searchPlaceholder}
@@ -1188,6 +1262,7 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 							},
 						},
 					] as any);
+					toast.success("File uploaded");
 					return;
 				}
 
@@ -1203,6 +1278,7 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 							},
 						},
 					] as any);
+					toast.success("File uploaded");
 					return;
 				}
 
@@ -1217,6 +1293,7 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 							},
 						},
 					] as any);
+					toast.success("File uploaded");
 					return;
 				}
 
@@ -1231,17 +1308,20 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 						},
 					},
 				] as any);
+				toast.success("File uploaded");
 			} catch (error) {
 				editor.replaceBlocks(
 					[placeholder.id],
 					[
 						{
 							type: "paragraph",
-							content: `Upload failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+							content: "Upload failed. Please try again.",
 						},
 					],
 				);
 				editor.setTextCursorPosition(cursorBlock.id);
+				console.error("Failed to upload file", error);
+				toast.error("Upload failed. Please try again.");
 			} finally {
 				window.clearInterval(timer);
 			}
@@ -1577,7 +1657,10 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 
 			for (const file of files) {
 				const type = getMediaTypeFromFile(file);
-				if (!type) continue;
+				if (!type) {
+					toast.error("File type not supported");
+					continue;
+				}
 				await uploadSingleFile(file, type, insertPosition ?? undefined);
 			}
 		},
@@ -2008,6 +2091,7 @@ export const NoteEditor = forwardRef<NoteEditorRef, NoteEditorProps>(({ workspac
 					const inferred = getMediaTypeFromFile(file);
 					if (!inferred || inferred !== expectedType) {
 						event.target.value = "";
+						toast.error("File type not supported");
 						return;
 					}
 

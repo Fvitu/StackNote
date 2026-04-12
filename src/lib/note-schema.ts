@@ -2,8 +2,6 @@ import { prisma } from "@/lib/prisma";
 
 export type NoteSchemaCapabilities = {
 	hasSearchableTextColumn: boolean;
-	hasEmbeddingColumn: boolean;
-	hasVectorUpdatedAtColumn: boolean;
 };
 
 type ColumnRow = {
@@ -24,14 +22,12 @@ export async function getNoteSchemaCapabilities(forceRefresh = false): Promise<N
 		FROM information_schema.columns
 		WHERE table_schema = 'public'
 			AND table_name = 'notes'
-			AND column_name IN ('searchableText', 'searchable_text', 'embedding', 'vectorUpdatedAt', 'vector_updated_at')
+			AND column_name IN ('searchableText', 'searchable_text')
 	`;
 
 	const columns = new Set(rows.map((row) => row.column_name));
 	const value: NoteSchemaCapabilities = {
 		hasSearchableTextColumn: columns.has("searchableText") || columns.has("searchable_text"),
-		hasEmbeddingColumn: columns.has("embedding"),
-		hasVectorUpdatedAtColumn: columns.has("vectorUpdatedAt") || columns.has("vector_updated_at"),
 	};
 
 	cachedCapabilities = {

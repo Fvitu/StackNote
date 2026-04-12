@@ -28,7 +28,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 		include: { workspace: { select: { userId: true } } },
 	});
 
-	if (!folder) {
+	if (!folder || folder.deletedAt) {
 		return NextResponse.json({ error: "Not found" }, { status: 404 });
 	}
 
@@ -59,7 +59,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 		include: { workspace: { select: { userId: true } } },
 	});
 
-	if (!folder) {
+	if (!folder || folder.deletedAt) {
 		return NextResponse.json({ error: "Not found" }, { status: 404 });
 	}
 
@@ -67,8 +67,75 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 		return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 	}
 
-	await prisma.folder.delete({ where: { id } });
+	const workspaceFolders = await prisma.folder.findMany({
+		where: { workspaceId: folder.workspaceId, deletedAt: null },
+		select: { id: true, parentId: true },
+	});
+
+	const childrenByParent = new Map<string | null, string[]>();
+	for (const candidate of workspaceFolders) {
+		const parentKey = candidate.parentId ?? null;
+		const siblings = childrenByParent.get(parentKey);
+		if (siblings) {
+			siblings.push(candidate.id);
+		} else {
+			childrenByParent.set(parentKey, [candidate.id]);
+		}
+	}
+
+	const descendantFolderIds = new Set<string>();
+	const queue: string[] = [id];
+	while (queue.length > 0) {
+		const currentFolderId = queue.shift();
+		if (!currentFolderId || descendantFolderIds.has(currentFolderId)) {
+			continue;
+		}
+
+		descendantFolderIds.add(currentFolderId);
+		const children = childrenByParent.get(currentFolderId) ?? [];
+		for (const childId of children) {
+			if (!descendantFolderIds.has(childId)) {
+				queue.push(childId);
+			}
+		}
+	}
+
+	const foldersToDelete = Array.from(descendantFolderIds);
+
+	const notesToDelete = await prisma.note.findMany({
+		where: {
+			workspaceId: folder.workspaceId,
+			folderId: { in: foldersToDelete },
+			deletedAt: null,
+		},
+		select: { id: true, folderId: true },
+	});
+
+	await prisma.$transaction(async (tx) => {
+		const deletedAt = new Date();
+
+		for (const folderId of foldersToDelete) {
+			const workspaceFolder = workspaceFolders.find((candidate) => candidate.id === folderId);
+			await tx.folder.update({
+				where: { id: folderId },
+				data: {
+					deletedAt,
+					originalParentId: workspaceFolder?.parentId ?? null,
+				},
+			});
+		}
+
+		for (const note of notesToDelete) {
+			await tx.note.update({
+				where: { id: note.id },
+				data: {
+					deletedAt,
+					originalParentId: note.folderId,
+				},
+			});
+		}
+	});
 	await invalidateWorkspaceTree(session.user.id, folder.workspaceId);
 
-	return NextResponse.json({ success: true });
+	return NextResponse.json({ success: true, deleted: { folders: foldersToDelete.length, notes: notesToDelete.length } });
 }

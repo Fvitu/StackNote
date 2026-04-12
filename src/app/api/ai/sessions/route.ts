@@ -25,6 +25,7 @@ async function resolveWorkspaceNoteTitle(userId: string, workspaceId: string, no
 			id: noteId,
 			workspaceId,
 			isArchived: false,
+			deletedAt: null,
 		},
 		select: {
 			title: true,
@@ -41,6 +42,7 @@ async function resolveWorkspaceIdForNote(userId: string, noteId: string | undefi
 		where: {
 			id: noteId,
 			isArchived: false,
+			deletedAt: null,
 			workspace: { userId },
 		},
 		select: {

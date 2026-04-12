@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { buildPlannerNoteMaterials, type PlannerNoteSource } from "@/lib/planner-notes";
 
 interface CreateExamRequest {
 	title?: string;
@@ -10,6 +11,28 @@ interface CreateExamRequest {
 	examDate?: string;
 	noteIds?: string[];
 	dailyStudyMinutes?: number;
+}
+
+interface UpdateExamRequest extends CreateExamRequest {
+	examId?: string;
+}
+
+interface ValidatedExamPayload {
+	title: string;
+	subject: string | null;
+	examDate: Date;
+	noteIds: string[];
+	dailyStudyMinutes: number;
+}
+
+class PlannerInputError extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
+		super(message);
+		this.name = "PlannerInputError";
+	}
 }
 
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -43,6 +66,10 @@ function toDateKeyFromDate(value: Date) {
 
 function todayString() {
 	return new Date().toISOString().slice(0, 10);
+}
+
+function clampStudyMinutes(value: number | undefined) {
+	return Math.min(60, Math.max(10, Math.round(value ?? 20)));
 }
 
 type PlannerNoteRow = {
@@ -87,12 +114,75 @@ function getPlanDayQuestionCount(planDay: PlannerPlanDayRow) {
 	return Array.isArray(planDay.cardIds) ? planDay.cardIds.length : 0;
 }
 
-async function loadPlannerData(userId: string, todayUtc: Date, todayKey: string) {
+async function validateExamPayload(
+	userId: string,
+	body: CreateExamRequest,
+	options: {
+		allowPastDate?: boolean;
+	},
+): Promise<ValidatedExamPayload> {
+	const title = body.title?.trim();
+	const examDate = body.examDate?.trim();
+	const noteIds = Array.isArray(body.noteIds)
+		? Array.from(new Set(body.noteIds.filter((noteId) => typeof noteId === "string" && noteId.trim().length > 0)))
+		: [];
+
+	if (!title) {
+		throw new PlannerInputError("Title is required", 400);
+	}
+
+	if (!examDate) {
+		throw new PlannerInputError("Exam date is required", 400);
+	}
+
+	const parsedExamDate = parseDateKeyToUtcDate(examDate);
+	if (!parsedExamDate) {
+		throw new PlannerInputError("Exam date must use YYYY-MM-DD format", 400);
+	}
+
+	if (!options.allowPastDate) {
+		const todayUtc = parseDateKeyToUtcDate(todayString());
+		if (todayUtc && parsedExamDate.getTime() < todayUtc.getTime()) {
+			throw new PlannerInputError("Exam date must be today or later", 400);
+		}
+	}
+
+	if (noteIds.length === 0) {
+		throw new PlannerInputError("Select at least one note", 400);
+	}
+
+	const accessibleNotes = await prisma.note.findMany({
+		where: {
+			id: { in: noteIds },
+			isArchived: false,
+			deletedAt: null,
+			workspace: {
+				userId,
+			},
+		},
+		select: { id: true },
+	});
+
+	if (accessibleNotes.length !== noteIds.length) {
+		throw new PlannerInputError("One or more notes are not accessible", 403);
+	}
+
+	return {
+		title,
+		subject: body.subject?.trim() || null,
+		examDate: parsedExamDate,
+		noteIds,
+		dailyStudyMinutes: clampStudyMinutes(body.dailyStudyMinutes),
+	};
+}
+
+async function loadPlannerData(userId: string, todayKey: string) {
 	try {
 		const [notes, exams, todaysPlanDays] = await Promise.all([
 			prisma.note.findMany({
 				where: {
 					isArchived: false,
+					deletedAt: null,
 					workspace: {
 						userId,
 					},
@@ -109,9 +199,6 @@ async function loadPlannerData(userId: string, todayUtc: Date, todayKey: string)
 				where: {
 					userId,
 					isCompleted: false,
-					examDate: {
-						gte: todayUtc,
-					},
 				},
 				include: {
 					studyPlanDays: {
@@ -175,6 +262,7 @@ async function loadPlannerData(userId: string, todayUtc: Date, todayKey: string)
 			prisma.note.findMany({
 				where: {
 					isArchived: false,
+					deletedAt: null,
 					workspace: {
 						userId,
 					},
@@ -190,9 +278,6 @@ async function loadPlannerData(userId: string, todayUtc: Date, todayKey: string)
 				where: {
 					userId,
 					isCompleted: false,
-					examDate: {
-						gte: todayUtc,
-					},
 				},
 				include: {
 					studyPlanDays: {
@@ -248,13 +333,11 @@ export async function GET() {
 	}
 
 	const todayKey = todayString();
-	const todayUtc = new Date(`${todayKey}T00:00:00.000Z`);
-	const { notes, exams, todaysPlanDays } = await loadPlannerData(session.user.id, todayUtc, todayKey);
+	const { notes, exams, todaysPlanDays } = await loadPlannerData(session.user.id, todayKey);
 
 	const serializedExams = exams.flatMap((exam) => {
 		const examDateKey = toDateKeyFromDate(exam.examDate);
 		if (!examDateKey) {
-			// Keep planner available even if a legacy row has an invalid timestamp.
 			console.error("[planner] Skipping exam with invalid examDate", { examId: exam.id });
 			return [];
 		}
@@ -307,58 +390,126 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
 	}
 
-	const title = body.title?.trim();
-	const examDate = body.examDate?.trim();
-	const noteIds = Array.isArray(body.noteIds) ? Array.from(new Set(body.noteIds.filter(Boolean))) : [];
+	try {
+		const payload = await validateExamPayload(session.user.id, body, { allowPastDate: false });
 
-	if (!title) {
-		return NextResponse.json({ error: "Title is required" }, { status: 400 });
+		// Ensure linked notes contain enough text to build a study plan before persisting the exam.
+		const notes = await prisma.note.findMany({
+			where: {
+				id: { in: payload.noteIds },
+				isArchived: false,
+				deletedAt: null,
+				workspace: { userId: session.user.id },
+			},
+			select: {
+				id: true,
+				title: true,
+				content: true,
+				searchableText: true,
+			},
+		});
+
+		const plannerNotes: PlannerNoteSource[] = notes;
+		const noteMaterials = buildPlannerNoteMaterials(plannerNotes);
+		if (noteMaterials.length === 0) {
+			throw new PlannerInputError("The linked notes do not contain enough text to build a study plan yet", 400);
+		}
+
+		const exam = await prisma.exam.create({
+			data: {
+				userId: session.user.id,
+				title: payload.title,
+				subject: payload.subject,
+				examDate: payload.examDate,
+				deckIds: [],
+				noteIds: payload.noteIds,
+				dailyStudyMinutes: payload.dailyStudyMinutes,
+			},
+		});
+
+		return NextResponse.json({ exam });
+	} catch (error) {
+		if (error instanceof PlannerInputError) {
+			return NextResponse.json({ error: error.message }, { status: error.status });
+		}
+
+		console.error("[planner] Failed to create exam:", error);
+		return NextResponse.json({ error: "Failed to create exam" }, { status: 500 });
+	}
+}
+
+export async function PATCH(request: NextRequest) {
+	const session = await auth();
+	if (!session?.user?.id) {
+		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 	}
 
-	if (!examDate) {
-		return NextResponse.json({ error: "Exam date is required" }, { status: 400 });
+	let body: UpdateExamRequest;
+	try {
+		body = (await request.json()) as UpdateExamRequest;
+	} catch {
+		return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
 	}
 
-	const parsedExamDate = parseDateKeyToUtcDate(examDate);
-	if (!parsedExamDate) {
-		return NextResponse.json({ error: "Exam date must use YYYY-MM-DD format" }, { status: 400 });
+	const examId = body.examId?.trim();
+	if (!examId) {
+		return NextResponse.json({ error: "examId is required" }, { status: 400 });
 	}
 
-	const todayUtc = parseDateKeyToUtcDate(todayString());
-	if (todayUtc && parsedExamDate.getTime() < todayUtc.getTime()) {
-		return NextResponse.json({ error: "Exam date must be today or later" }, { status: 400 });
-	}
-
-	if (noteIds.length === 0) {
-		return NextResponse.json({ error: "Select at least one note" }, { status: 400 });
-	}
-
-	const accessibleNotes = await prisma.note.findMany({
-		where: {
-			id: { in: noteIds },
-			isArchived: false,
-			workspace: {
+	try {
+		const payload = await validateExamPayload(session.user.id, body, { allowPastDate: true });
+		const existingExam = await prisma.exam.findFirst({
+			where: {
+				id: examId,
 				userId: session.user.id,
 			},
-		},
-		select: { id: true },
-	});
+			select: {
+				id: true,
+				deckIds: true,
+			},
+		});
 
-	if (accessibleNotes.length !== noteIds.length) {
-		return NextResponse.json({ error: "One or more notes are not accessible" }, { status: 403 });
+		if (!existingExam) {
+			return NextResponse.json({ error: "Exam not found" }, { status: 404 });
+		}
+
+		const deckTitle = payload.subject ?? payload.title;
+		const exam = await prisma.$transaction(async (tx) => {
+			const updatedExam = await tx.exam.update({
+				where: { id: existingExam.id },
+				data: {
+					title: payload.title,
+					subject: payload.subject,
+					examDate: payload.examDate,
+					noteIds: payload.noteIds,
+					dailyStudyMinutes: payload.dailyStudyMinutes,
+				},
+			});
+
+			if (existingExam.deckIds.length > 0) {
+				await tx.flashcardDeck.updateMany({
+					where: {
+						id: {
+							in: existingExam.deckIds,
+						},
+						userId: session.user.id,
+					},
+					data: {
+						title: deckTitle,
+					},
+				});
+			}
+
+			return updatedExam;
+		});
+
+		return NextResponse.json({ exam });
+	} catch (error) {
+		if (error instanceof PlannerInputError) {
+			return NextResponse.json({ error: error.message }, { status: error.status });
+		}
+
+		console.error("[planner] Failed to update exam:", error);
+		return NextResponse.json({ error: "Failed to update exam" }, { status: 500 });
 	}
-
-	const exam = await prisma.exam.create({
-		data: {
-			userId: session.user.id,
-			title,
-			subject: body.subject?.trim() || null,
-			examDate: parsedExamDate,
-			deckIds: [],
-			noteIds,
-			dailyStudyMinutes: Math.min(60, Math.max(10, Math.round(body.dailyStudyMinutes ?? 20))),
-		},
-	});
-
-	return NextResponse.json({ exam });
 }

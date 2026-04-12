@@ -89,7 +89,7 @@ function QuickNoteEditor({ initialContent, onChange }: { initialContent: unknown
 	);
 }
 
-export function QuickNoteWidget({ userId }: { userId: string }) {
+export function QuickNoteWidget({ userId, isHidden = false }: { userId: string; isHidden?: boolean }) {
 	const [isExpanded, setIsExpanded] = useState(false);
 	const [size, setSize] = useState({ width: 300, height: 420 });
 	const [viewportWidth, setViewportWidth] = useState(0);
@@ -206,6 +206,10 @@ export function QuickNoteWidget({ userId }: { userId: string }) {
 			height: size.height,
 		};
 	};
+
+	if (isHidden) {
+		return null;
+	}
 
 	return (
 		<div

@@ -36,8 +36,8 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ error: "File too large (max 50MB)" }, { status: 400 });
 	}
 
-	const note = await prisma.note.findUnique({
-		where: { id: noteId },
+	const note = await prisma.note.findFirst({
+		where: { id: noteId, deletedAt: null },
 		select: {
 			id: true,
 			workspace: {

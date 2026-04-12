@@ -92,6 +92,8 @@ model Folder {
   name        String
   workspaceId String
   parentId    String?
+  deletedAt   DateTime?
+  originalParentId String?
   order       Int       @default(0)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -101,6 +103,8 @@ model Folder {
   notes       Note[]
 
   @@index([workspaceId])
+  @@index([workspaceId, deletedAt])
+  @@index([parentId, deletedAt])
   @@map("folders")
 }
 
@@ -115,6 +119,8 @@ model Note {
   coverImage     String?
   coverImageMeta Json?
   isArchived     Boolean         @default(false)
+  deletedAt      DateTime?
+  originalParentId String?
   order          Int             @default(0)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -124,13 +130,14 @@ model Note {
   aiChatSessions AIChatSession[]
   flashcardDecks FlashcardDeck[]
   searchVector   Unsupported("tsvector")?
-  embedding      Unsupported("vector(768)")?
-  vectorUpdatedAt DateTime?
+  lastEditedAt   DateTime?
   folder         Folder?         @relation(fields: [folderId], references: [id])
   workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([searchVector], type: Gin)
   @@index([workspaceId, updatedAt(sort: Desc)])
+  @@index([workspaceId, deletedAt])
+  @@index([folderId, deletedAt])
   @@map("notes")
 }
 
