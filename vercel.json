@@ -1,4 +1,7 @@
 {
+  "github": {
+    "silent": true
+  },
   "crons": [
     {
       "path": "/api/cron/purge-guests",
@@ -7,6 +10,10 @@
     {
       "path": "/api/cron/purge-trash",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/keep-alive",
+      "schedule": "0 4 */3 * *"
     }
   ]
 }
