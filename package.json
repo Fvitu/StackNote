@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build --webpack",
+    "build": "prisma generate && next build --webpack",
     "start": "next start",
-    "postinstall": "node scripts/apply-oauth4webapi-patch.mjs",
+    "postinstall": "node scripts/apply-oauth4webapi-patch.mjs && prisma generate",
     "lint": "eslint",
     "backfill:search": "tsx scripts/backfill-note-search-data.ts",
     "icons:generate": "tsx scripts/generate-icons.ts"
