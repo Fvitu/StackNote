@@ -256,3 +256,79 @@ export async function deleteStoredObjects(paths: string[]) {
 
 	return deletedCount;
 }
+
+export async function purgeExpiredTrash(db: PrismaClient) {
+	const cutoffDate = getTrashCutoffDate();
+	const [notes, folders] = await Promise.all([
+		db.note.findMany({
+			where: {
+				deletedAt: {
+					lte: cutoffDate,
+				},
+			},
+			select: {
+				id: true,
+			},
+		}),
+		db.folder.findMany({
+			where: {
+				deletedAt: {
+					lte: cutoffDate,
+				},
+			},
+			select: {
+				id: true,
+			},
+		}),
+	]);
+
+	const noteIds = notes.map((note) => note.id);
+	const folderIds = folders.map((folder) => folder.id);
+	const paths = await collectStoredFilePathsForNotes(db, noteIds);
+	const purgedFiles = await deleteStoredObjects(paths);
+
+	const purged = await db.$transaction(async (tx) => {
+		if (noteIds.length > 0) {
+			await tx.file.deleteMany({
+				where: {
+					noteId: {
+						in: noteIds,
+					},
+				},
+			});
+		}
+
+		const [purgedNotes, purgedFolders] = await Promise.all([
+			noteIds.length > 0
+				? tx.note.deleteMany({
+						where: {
+							id: {
+								in: noteIds,
+							},
+						},
+					})
+				: Promise.resolve({ count: 0 }),
+			folderIds.length > 0
+				? tx.folder.deleteMany({
+						where: {
+							id: {
+								in: folderIds,
+							},
+						},
+					})
+				: Promise.resolve({ count: 0 }),
+		]);
+
+		return {
+			purgedNotes: purgedNotes.count,
+			purgedFolders: purgedFolders.count,
+		};
+	});
+
+	return {
+		purgedNotes: purged.purgedNotes,
+		purgedFolders: purged.purgedFolders,
+		purgedFiles,
+	};
+}
+

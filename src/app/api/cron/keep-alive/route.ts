@@ -6,24 +6,7 @@ export const dynamic = "force-dynamic";
 
 const MUTABLE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
-function readBearerToken(request: NextRequest): string {
-	const header = request.headers.get("authorization")?.trim() ?? "";
-	const match = /^Bearer\s+(.+)$/i.exec(header);
-	return match?.[1]?.trim() ?? "";
-}
-
-function isVercelCronRequest(request: NextRequest): boolean {
-	return request.headers.get("x-vercel-cron") === "1";
-}
-
-export async function GET(request: NextRequest) {
-	const cronSecret = process.env.CRON_SECRET?.trim();
-	const isDev = process.env.NODE_ENV === "development";
-
-	if (!isDev && !isVercelCronRequest(request) && (!cronSecret || readBearerToken(request) !== cronSecret)) {
-		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-	}
-
+export async function GET(_request: NextRequest) {
 	const startTime = Date.now();
 	let dbStatus = "unknown";
 	let dbError: string | null = null;

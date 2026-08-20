@@ -110,13 +110,17 @@ export async function cleanupExpiredGuestUsers() {
 		take: 200,
 	});
 
+	let purgedCount = 0;
 	for (const guest of expiredGuests) {
 		try {
 			await purgeGuestUser(guest.id);
+			purgedCount++;
 		} catch (error) {
 			console.error("Failed to purge expired guest user:", guest.id, error);
 		}
 	}
+
+	return { purgedGuests: purgedCount, totalFound: expiredGuests.length };
 }
 
 export function scheduleGuestCleanup() {
@@ -131,6 +135,7 @@ export function scheduleGuestCleanup() {
 	}
 
 	cleanupPromise = cleanupExpiredGuestUsers()
+		.then(() => undefined)
 		.catch((error) => {
 			console.error("Guest cleanup failed:", error);
 		})
